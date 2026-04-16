@@ -1111,10 +1111,15 @@ const TournamentHub = {
 
       const tabs = el('div', { className: 'tourney-tabs' });
       const tabOptions = [];
+      
+      // ALWAYS push schedule tab unconditionally so ALL matches can be accessed here
+      tabOptions.push(['schedule', '📅 Schedule']);
+      
+      // Only show standings if it's a group tournament
       if(t.format === 'groups') {
-          tabOptions.push(['schedule', '📅 Schedule']);
           tabOptions.push(['standings', '📊 Standings']);
       }
+      
       tabOptions.push(['bracket', '🏆 Knockout Bracket']);
       
       if (!this.activeTab || !tabOptions.find(opt => opt[0] === this.activeTab)) this.activeTab = tabOptions[0][0];
@@ -1127,44 +1132,97 @@ const TournamentHub = {
       container.appendChild(wrap);
   },
 
-  /* --- SCHEDULE VISUALS --- */
+  /* --- SCHEDULE VISUALS (ALL MATCHES) --- */
   _renderSchedule(t) {
       const wrap = el('div', { className: 'w-full' });
       const grid = el('div', { className: 'groups-grid' });
-      t.groups.forEach(g => {
-          const card = el('div', { className: 'group-card' });
-          card.appendChild(el('div', { className: 'group-header' }, [
-              el('span', {}, [`Group ${g.id} Matches`])
-          ]));
+      
+      const createMatchBlock = (m) => {
+          const mSel = el('div', { className: 'match-selector', style: {height: '100%', display: 'flex', flexDirection: 'column'} });
           
-          const matchesDiv = el('div', { className: 'match-list', style: {maxHeight: 'none', background: 'transparent', padding: '16px'} });
-          g.matches.forEach(m => {
-              const mSel = el('div', { className: 'match-selector' });
+          const makeTeamRow = (teamObj, label) => {
+              const isWin = m.winnerId && teamObj && m.winnerId === teamObj.id;
+              const div = el('div', { className: 'match-team' + (isWin ? ' winner' : ''), onClick: () => TournamentManager.simulateWin(m.id, teamObj?.id) });
               
-              const makeTeamRow = (teamObj) => {
-                  const isWin = m.winnerId === teamObj?.id;
-                  const div = el('div', { className: 'match-team' + (isWin ? ' winner' : ''), onClick: () => TournamentManager.simulateWin(m.id, teamObj.id) });
-                  div.appendChild(el('span', {}, [escapeHTML(teamObj?.name || 'TBD')]));
-                  if (isWin) div.appendChild(el('span', {}, ['✓']));
-                  return div;
-              };
+              const labelSpan = label ? `<span style="display:block; font-size:0.65rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:2px;">${label}</span>` : '';
+              const nameSpan = `<span>${escapeHTML(teamObj?.name || 'TBD')}</span>`;
               
-              mSel.appendChild(makeTeamRow(m.teamA));
-              mSel.appendChild(makeTeamRow(m.teamB));
-              
-              const actionsRow = el('div', { style: { padding: '6px', textAlign: 'center', background: 'rgba(0,0,0,0.2)' } });
-              if (m.status === 'completed') {
-                  actionsRow.appendChild(el('span', {className:'text-xs', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['Completed']));
-              } else if (m.status === 'live') {
-                  actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 Resume Live Match']));
+              div.innerHTML = `<div>${labelSpan}${nameSpan}</div>`;
+              if (isWin) div.appendChild(el('span', {}, ['✓']));
+              return div;
+          };
+          
+          const teamWrap = el('div', { style: {flex: 1} });
+          teamWrap.appendChild(makeTeamRow(m.teamA, m.labelA));
+          teamWrap.appendChild(makeTeamRow(m.teamB, m.labelB));
+          mSel.appendChild(teamWrap);
+          
+          const actionsRow = el('div', { style: { padding: '6px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', marginTop: 'auto' } });
+          if (m.status === 'completed') {
+              actionsRow.appendChild(el('span', {className:'text-xs', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['Completed']));
+          } else if (m.status === 'live') {
+              actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 Resume Live Match']));
+          } else {
+              if (!m.teamA || !m.teamB) {
+                  actionsRow.appendChild(el('span', {className:'text-xs text-muted'}, ['Pending Teams']));
               } else {
                   actionsRow.appendChild(el('button', { className: 'btn btn-ghost btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['▶ Start Match']));
               }
-              mSel.appendChild(actionsRow);
-              matchesDiv.appendChild(mSel);
+          }
+          mSel.appendChild(actionsRow);
+          return mSel;
+      };
+
+      // 1. Group Stage Matches
+      if (t.groups && t.groups.length > 0) {
+          t.groups.forEach(g => {
+              const card = el('div', { className: 'group-card' });
+              card.appendChild(el('div', { className: 'group-header' }, [
+                  el('span', {}, [`Group ${g.id} Matches`])
+              ]));
+              
+              const matchesDiv = el('div', { className: 'match-list', style: {maxHeight: 'none', background: 'transparent', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px'} });
+              g.matches.forEach(m => {
+                  matchesDiv.appendChild(createMatchBlock(m));
+              });
+              card.appendChild(matchesDiv); 
+              grid.appendChild(card);
           });
-          card.appendChild(matchesDiv); grid.appendChild(card);
-      });
+      }
+      
+      // 2. Knockout Matches
+      if (t.koMatches && t.koMatches.length > 0) {
+          const koCard = el('div', { className: 'group-card', style: { gridColumn: '1 / -1' } });
+          koCard.appendChild(el('div', { className: 'group-header', style: {background: 'rgba(79, 195, 247, 0.15)', color: 'var(--accent-primary)'} }, [
+              el('span', {}, [`Knockout Stage Matches`])
+          ]));
+          
+          const matchesDiv = el('div', { className: 'match-list', style: {maxHeight: 'none', background: 'transparent', padding: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px'} });
+          
+          let hasKOMatches = false;
+          t.koMatches.forEach((round, rIndex) => {
+              const isFinal = rIndex === t.koMatches.length - 1;
+              const roundName = isFinal ? 'Final' : (rIndex === t.koMatches.length - 2 ? 'Semi-Finals' : `Round ${rIndex + 1}`);
+
+              round.forEach(m => {
+                  if (m.isBye) return; // Hide byes from schedule
+                  hasKOMatches = true;
+                  
+                  const wrapBlock = el('div', { style: {display: 'flex', flexDirection: 'column', height: '100%'} });
+                  const rHeader = el('div', { style: {fontSize: '0.7rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px', textAlign: 'center'} }, [`${roundName} - M${m.matchNum}`]);
+                  wrapBlock.appendChild(rHeader);
+                  wrapBlock.appendChild(createMatchBlock(m));
+                  
+                  matchesDiv.appendChild(wrapBlock);
+              });
+          });
+          
+          if (hasKOMatches) {
+              koCard.appendChild(matchesDiv);
+              grid.appendChild(koCard);
+          }
+      }
+
       wrap.appendChild(grid);
       return wrap;
   },
