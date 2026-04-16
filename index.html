@@ -802,7 +802,7 @@ const Router = {
         FBM.startTournamentSync((tourney) => {
             TournamentManager.current = tourney;
             // Ensure tournament and tournament_print views wait for this sync
-            if (this.currentView === 'tournament' || this.currentView === 'home' || this.currentView === 'tournament_print') {
+            if (this.currentView === 'tournament' || this.currentView === 'home' || this.currentView === 'tournament_print' || this.currentView === 'history') {
                 if (this.currentView === 'tournament' && !tourney) this.navigate('home');
                 else this.render();
             }
@@ -903,7 +903,38 @@ const HistoryHub = {
         if (FBM.user) hist = await FBM.getHistory(); else { try { hist = JSON.parse(localStorage.getItem('TOURNAMENT_HISTORY_V4') || '[]'); } catch(e){} }
 
         listWrap.innerHTML = '';
-        if (hist.length === 0) { listWrap.appendChild(el('div', {className: 'card text-center text-muted p-lg'}, ['No past tournaments found.'])); return; }
+        
+        // Render Active Tournament at the top if one exists
+        const activeT = TournamentManager.current;
+        if (activeT) {
+            const card = el('div', { className: 'card flex flex-col gap-md', style: { border: '2px solid var(--accent-success)', background: 'rgba(102, 187, 106, 0.05)' } });
+            const topRow = el('div', { className: 'flex justify-between items-center flex-wrap gap-md' });
+            const info = el('div', {className: 'flex flex-col gap-xs'});
+            
+            const titleRow = el('div', { className: 'flex items-center gap-sm' });
+            titleRow.appendChild(el('div', {className: 'text-lg', style:{fontWeight: '700'}}, [activeT.name]));
+            titleRow.appendChild(el('span', { style: { background: 'var(--accent-success)', color: '#000', fontSize: '0.7rem', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' } }, ['ACTIVE']));
+            info.appendChild(titleRow);
+
+            info.appendChild(el('div', {className: 'text-sm text-secondary'}, [`Started • ${(activeT.format||'').replace('_', ' ').toUpperCase()}`]));
+            topRow.appendChild(info);
+
+            const actions = el('div', {className: 'flex gap-sm'});
+            actions.appendChild(el('button', { className: 'btn btn-success btn-sm', onClick: () => Router.navigate('tournament') }, ['🏸 View / Officiate Matches']));
+            actions.appendChild(el('button', { className: 'btn btn-primary btn-sm', onClick: () => DisplayManager.launchTournamentExport() }, ['🖨️ Live Report']));
+            topRow.appendChild(actions); card.appendChild(topRow); listWrap.appendChild(card);
+        }
+
+        if (hist.length === 0 && !activeT) { 
+            listWrap.appendChild(el('div', {className: 'card text-center text-muted p-lg'}, ['No past tournaments found.'])); 
+            return; 
+        }
+
+        // Render completed history
+        if (hist.length > 0) {
+            const histTitle = el('div', { className: 'text-sm text-muted mt-md mb-sm', style: { fontWeight: 'bold', textTransform: 'uppercase' } }, ['Completed Tournaments']);
+            listWrap.appendChild(histTitle);
+        }
 
         hist.forEach(t => {
             const card = el('div', { className: 'card flex flex-col gap-md' });
@@ -1122,7 +1153,13 @@ const TournamentHub = {
               mSel.appendChild(makeTeamRow(m.teamB));
               
               const actionsRow = el('div', { style: { padding: '6px', textAlign: 'center', background: 'rgba(0,0,0,0.2)' } });
-              actionsRow.appendChild(el('button', { className: 'btn btn-ghost btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto'}, onClick: () => this._playTournamentMatch(m.id) }, ['▶ Play Match']));
+              if (m.status === 'completed') {
+                  actionsRow.appendChild(el('span', {className:'text-xs', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['Completed']));
+              } else if (m.status === 'live') {
+                  actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 Resume Live Match']));
+              } else {
+                  actionsRow.appendChild(el('button', { className: 'btn btn-ghost btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['▶ Start Match']));
+              }
               mSel.appendChild(actionsRow);
               matchesDiv.appendChild(mSel);
           });
@@ -1224,9 +1261,10 @@ const TournamentHub = {
               else {
                   // Add play button inside bracket
                   const actionsRow = el('div', { className: 'no-print', style: { padding: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.3)', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px' } });
-                  if (m.status === 'completed') actionsRow.appendChild(el('span', {className:'text-xs text-muted'}, ['Completed']));
+                  if (m.status === 'completed') actionsRow.appendChild(el('span', {className:'text-xs text-success', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['Completed']));
                   else if (!m.teamA || !m.teamB) actionsRow.appendChild(el('span', {className:'text-xs text-muted'}, ['Pending Teams']));
-                  else actionsRow.appendChild(el('button', { className: 'btn btn-ghost btn-sm', style: {fontSize: '0.7rem', padding: '2px 8px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['▶ Play Match']));
+                  else if (m.status === 'live') actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm', style: {fontSize: '0.7rem', padding: '2px 8px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 Resume Live Match']));
+                  else actionsRow.appendChild(el('button', { className: 'btn btn-ghost btn-sm', style: {fontSize: '0.7rem', padding: '2px 8px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['▶ Start Match']));
                   kMatch.appendChild(actionsRow);
               }
               
