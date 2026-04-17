@@ -319,7 +319,25 @@ const FBM = {
     unsubscribeTournament: null, unsubscribeBoard: null,
     async init() {
         try {
-            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+            let firebaseConfig;
+            
+            if (typeof __firebase_config !== 'undefined') {
+                // This handles the internal Canvas database preview automatically
+                firebaseConfig = JSON.parse(__firebase_config);
+            } else {
+                // 👇👇👇 PASTE YOUR FIREBASE KEYS HERE FOR GITHUB 👇👇👇
+                const firebaseConfig = {
+    apiKey: "AIzaSyDh-hMs96wWzJl2RcjY5vHUoumjgQPTkbY",
+    authDomain: "badminton-scoring-38cfa.firebaseapp.com",
+    projectId: "badminton-scoring-38cfa",
+    storageBucket: "badminton-scoring-38cfa.firebasestorage.app",
+    messagingSenderId: "850473866570",
+    appId: "1:850473866570:web:8c7b28e46d25a1a1129db3"
+  };
+    
+                // 👆👆👆 ======================================== 👆👆👆
+            }
+            
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'live-score-pro';
             this.basePath = ['artifacts', appId, 'public', 'data'];
 
@@ -1112,14 +1130,10 @@ const TournamentHub = {
       const tabs = el('div', { className: 'tourney-tabs' });
       const tabOptions = [];
       
-      // ALWAYS push schedule tab unconditionally so ALL matches can be accessed here
       tabOptions.push(['schedule', '📅 Schedule']);
-      
-      // Only show standings if it's a group tournament
       if(t.format === 'groups') {
           tabOptions.push(['standings', '📊 Standings']);
       }
-      
       tabOptions.push(['bracket', '🏆 Knockout Bracket']);
       
       if (!this.activeTab || !tabOptions.find(opt => opt[0] === this.activeTab)) this.activeTab = tabOptions[0][0];
