@@ -334,14 +334,16 @@ const FBM = {
     messagingSenderId: "850473866570",
     appId: "1:850473866570:web:8c7b28e46d25a1a1129db3"
   };
-    
                 // 👆👆👆 ======================================== 👆👆👆
             }
             
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'live-score-pro';
             this.basePath = ['artifacts', appId, 'public', 'data'];
 
-            if (!firebaseConfig) { console.warn('Cloud mode inactive.'); return false; }
+            if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.includes('YOUR_API_KEY')) { 
+                console.warn('Cloud mode inactive. Using local storage.'); 
+                return false; 
+            }
 
             const app = initializeApp(firebaseConfig);
             this.auth = getAuth(app);
@@ -359,21 +361,19 @@ const FBM = {
             return false;
         }
     },
-    startTournamentSync(onUpdate) {
-        if (!this.user) return;
+    startTournamentSync(tourneyId, onUpdate) {
+        if (!this.user || !tourneyId) return;
         if (this.unsubscribeTournament) this.unsubscribeTournament();
-        this.unsubscribeTournament = onSnapshot(collection(this.db, ...this.basePath, 'tournaments'), (snapshot) => {
-            let tourney = null;
-            snapshot.forEach(d => { if (d.id === 'main' && !d.data()._deleted) tourney = d.data(); });
-            onUpdate(tourney);
+        this.unsubscribeTournament = onSnapshot(doc(this.db, ...this.basePath, 'tournaments', tourneyId), (d) => {
+            onUpdate(d.exists() && !d.data()._deleted ? d.data() : null);
         }, (err) => console.error(err));
     },
     async saveTournament(tourney) {
-        if (!this.user || !tourney) return;
-        try { await setDoc(doc(this.db, ...this.basePath, 'tournaments', 'main'), tourney); } catch(e){}
+        if (!this.user || !tourney || !tourney.id) return;
+        try { await setDoc(doc(this.db, ...this.basePath, 'tournaments', tourney.id), tourney); } catch(e){}
     },
     async saveTournamentToHistory(tourney) {
-        if (!this.user || !tourney) return;
+        if (!this.user || !tourney || !tourney.id) return;
         try { await setDoc(doc(this.db, ...this.basePath, 'tournament_history', tourney.id), tourney); } catch(e){}
     },
     async getHistory() {
@@ -599,7 +599,14 @@ const TournamentManager = {
       if (FBM.user) await FBM.saveTournamentToHistory(this.current);
       this.clear();
   },
-  clear() { this.current = null; localStorage.removeItem('TOURNAMENT_STATE_V4'); FBM.saveTournament({ _deleted: true }); },
+  clear() { 
+      if (this.current && this.current.id) {
+          FBM.saveTournament({ id: this.current.id, _deleted: true });
+      }
+      this.current = null; 
+      localStorage.removeItem('TOURNAMENT_STATE_V4'); 
+      localStorage.removeItem('ACTIVE_TOURNEY_ID');
+  },
   
   createMatch(id, t1, t2, roundLabel, isBye = false) { 
       return { 
@@ -814,17 +821,32 @@ const Router = {
                  } catch(e){}
              }
         }
+        
+        // Handle loading specific tournament via URL parameter or local storage
+        if (params.get('tid')) localStorage.setItem('ACTIVE_TOURNEY_ID', params.get('tid'));
     } catch(e){}
 
+    const activeTourneyId = localStorage.getItem('ACTIVE_TOURNEY_ID');
+
     if (FBM.user) {
-        FBM.startTournamentSync((tourney) => {
-            TournamentManager.current = tourney;
-            // Ensure tournament and tournament_print views wait for this sync
-            if (this.currentView === 'tournament' || this.currentView === 'home' || this.currentView === 'tournament_print' || this.currentView === 'history') {
-                if (this.currentView === 'tournament' && !tourney) this.navigate('home');
-                else this.render();
+        if (activeTourneyId) {
+            window.__IS_FETCHING_TOURNEY = true;
+            FBM.startTournamentSync(activeTourneyId, (tourney) => {
+                window.__IS_FETCHING_TOURNEY = false;
+                TournamentManager.current = tourney;
+                if (this.currentView === 'tournament' && !tourney) {
+                    this.navigate('home');
+                    Toast.show('Tournament not found or ended.');
+                } else if (this.currentView === 'tournament' || this.currentView === 'home' || this.currentView === 'tournament_print' || this.currentView === 'history') {
+                    this.render();
+                }
+            });
+        } else {
+            // No active tournament ID saved yet, still allow rendering home/history
+            if (this.currentView === 'tournament' || this.currentView === 'home' || this.currentView === 'history') {
+                this.render();
             }
-        });
+        }
 
         if (this.currentView === 'board' && AppState.activeMatchId) {
             this.render(); 
@@ -834,11 +856,10 @@ const Router = {
              if (state) AppState.current = state;
              this.render(); setTimeout(() => window.print(), 1000);
         } else if (this.currentView === 'print' || this.currentView === 'tournament_print') {
-             // For tournament_print, startTournamentSync will re-render when data arrives.
-             // We trigger print after a brief delay to ensure Firebase finishes the network call.
              this.render(); setTimeout(() => window.print(), 2000);
         } else { this.render(); }
     } else {
+        // Fallback for offline or invalid Firebase Config
         TournamentManager.loadLocalFallback(); AppState.load();
         if (this.currentView === 'board') {
              setInterval(() => {
@@ -885,7 +906,27 @@ const Renderer = {
     home.appendChild(el('div', { className: 'home-logo' }, ['LiveScore Pro']));
     home.appendChild(el('div', { className: 'home-tagline' }, ['Ultimate Bracket Edition']));
     
-    const cards = el('div', { className: 'sport-cards' });
+    // --- NEW: Join Tournament UI ---
+    const joinSection = el('div', { className: 'card flex flex-col items-center mt-lg mb-md', style: {maxWidth: '600px', width: '100%', background: 'rgba(79, 195, 247, 0.05)', borderColor: 'var(--accent-primary)'} });
+    joinSection.appendChild(el('div', { className: 'text-lg', style: {fontWeight: 'bold', marginBottom: '8px', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '1px'} }, ['Umpire / Join Match']));
+    joinSection.appendChild(el('div', { className: 'text-sm text-secondary mb-md' }, ['Enter the Tournament ID provided by the organizer to officiate matches.']));
+    const joinRow = el('div', { className: 'flex gap-sm w-full', style: {maxWidth: '400px'} });
+    const joinInput = el('input', { type: 'text', placeholder: 'Enter ID (e.g. A1B2C3)', style: {flex: 1, textTransform: 'uppercase', textAlign: 'center', fontSize: '1.2rem', letterSpacing: '2px', fontWeight: 'bold'} });
+    const joinBtn = el('button', { className: 'btn btn-primary', onClick: () => {
+        const id = joinInput.value.trim().toUpperCase();
+        if(id) {
+            localStorage.setItem('ACTIVE_TOURNEY_ID', id);
+            Router.navigate('tournament');
+            window.location.reload(); // Quick refresh to re-bind listeners properly to new ID
+        } else {
+            Toast.show('Please enter a valid Tournament ID', 2000);
+        }
+    }}, ['Join']);
+    joinRow.appendChild(joinInput); joinRow.appendChild(joinBtn);
+    joinSection.appendChild(joinRow);
+    home.appendChild(joinSection);
+
+    const cards = el('div', { className: 'sport-cards', style: {marginTop: '24px'} });
     cards.appendChild(el('div', { className: 'sport-card', onClick: () => { TournamentManager.clear(); Router.navigate('tournament'); } }, [ 
         el('span', { className: 'sport-card-emoji' }, ['🏆']), 
         el('div', { className: 'sport-card-title' }, ['New Tournament']), 
@@ -899,7 +940,7 @@ const Renderer = {
     home.appendChild(cards);
 
     const actions = el('div', { className: 'flex-wrap justify-center gap-md mt-lg', style: {display:'flex'} });
-    if(TournamentManager.current) { actions.appendChild(el('button', { className: 'btn btn-primary', onClick: () => Router.navigate('tournament') }, [Icons.trophy, ' Resume Active Tournament'])); }
+    if(TournamentManager.current) { actions.appendChild(el('button', { className: 'btn btn-ghost', onClick: () => Router.navigate('tournament') }, [Icons.trophy, ' Resume Current Tournament'])); }
     home.appendChild(actions); container.appendChild(home);
   }
 };
@@ -934,7 +975,7 @@ const HistoryHub = {
             titleRow.appendChild(el('span', { style: { background: 'var(--accent-success)', color: '#000', fontSize: '0.7rem', padding: '2px 8px', borderRadius: '12px', fontWeight: 'bold' } }, ['ACTIVE']));
             info.appendChild(titleRow);
 
-            info.appendChild(el('div', {className: 'text-sm text-secondary'}, [`Started • ${(activeT.format||'').replace('_', ' ').toUpperCase()}`]));
+            info.appendChild(el('div', {className: 'text-sm text-secondary'}, [`ID: ${activeT.id} • Started • ${(activeT.format||'').replace('_', ' ').toUpperCase()}`]));
             topRow.appendChild(info);
 
             const actions = el('div', {className: 'flex gap-sm'});
@@ -975,7 +1016,13 @@ const TournamentHub = {
   activeTab: null,
   setupState: { step: 1, name: '', format: 'groups', numGroups: 4, advanceCount: 2, teamCount: 8, teams: [], settings: { matchType: 'singles', bestOf: 3, pointsToWin: 21, deuceEnabled: true, deuceCap: 30 } },
   
-  render(container) { if (TournamentManager.current) this._renderDashboard(container); else this._renderSetup(container); },
+  render(container) { 
+      if (window.__IS_FETCHING_TOURNEY) {
+          container.innerHTML = '<div class="text-center p-lg text-muted" style="margin-top: 100px; font-size: 1.2rem;">Syncing Live Tournament Data...</div>';
+          return;
+      }
+      if (TournamentManager.current) this._renderDashboard(container); else this._renderSetup(container); 
+  },
 
   _renderSetup(container) {
     container.innerHTML = ''; const wizard = el('div', { className: 'wizard' });
@@ -1097,8 +1144,11 @@ const TournamentHub = {
           for(let i=0; i<needed; i++) if(!t.players[i] || !t.players[i].name.trim()) t.players[i] = { id: uid(), name: `${t.name} P${i+1}` };
       });
 
+      // Generate a user friendly 6-character Tournament ID
+      const tourneyId = Math.random().toString(36).slice(2, 8).toUpperCase();
+
       const tourney = {
-          id: uid(), name: s.name || 'Unnamed Tournament', format: s.format, phase: s.format === 'groups' ? 'rr' : 'ko', 
+          id: tourneyId, name: s.name || 'Unnamed Tournament', format: s.format, phase: s.format === 'groups' ? 'rr' : 'ko', 
           numGroups: s.numGroups, advanceCount: s.advanceCount, teams: teams, settings: s.settings, groups: [], koMatches: []
       };
 
@@ -1108,8 +1158,11 @@ const TournamentHub = {
           tourney.koMatches = TournamentManager.generateBWFKnockout(qualified);
       }
 
-      TournamentManager.current = tourney; TournamentManager.save();
-      Toast.show('Tournament Generated!'); Router.render();
+      TournamentManager.current = tourney; 
+      localStorage.setItem('ACTIVE_TOURNEY_ID', tourneyId);
+      TournamentManager.save();
+      Toast.show('Tournament Generated!'); 
+      Router.render();
   },
 
   /* --- TOURNAMENT DASHBOARD --- */
@@ -1117,8 +1170,11 @@ const TournamentHub = {
       const t = TournamentManager.current; const wrap = el('div', { className: 'tournament-hub' });
       
       const header = el('div', {className: 'flex justify-between items-center mb-lg flex-wrap gap-md'});
-      header.appendChild(el('h2', { className: 'section-header', style:{margin:0, color: 'var(--accent-primary)'} }, [Icons.trophy, ` ${t.name.toUpperCase()}`]));
-      
+      const titleArea = el('div', {className: 'flex flex-col gap-xs'});
+      titleArea.appendChild(el('h2', { className: 'section-header', style:{margin:0, color: 'var(--accent-primary)'} }, [Icons.trophy, ` ${t.name.toUpperCase()}`]));
+      titleArea.appendChild(el('div', { className: 'text-sm text-secondary mono', style: { background: 'rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: '4px', width: 'fit-content', userSelect: 'all'} }, [`ID: ${t.id}`]));
+      header.appendChild(titleArea);
+
       const actions = el('div', {className: 'flex gap-sm flex-wrap'});
       actions.appendChild(el('button', { className: 'btn btn-ghost btn-sm', onClick: () => Router.navigate('home') }, ['← Exit']));
       actions.appendChild(el('button', { className: 'btn btn-primary btn-sm', onClick: () => DisplayManager.launchTournamentExport() }, ['🖨️ Tourney Report']));
