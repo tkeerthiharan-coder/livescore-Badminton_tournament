@@ -305,35 +305,40 @@ input:focus, select:focus { border-color: var(--accent-primary); box-shadow: 0 0
 <div id="app"></div>
 <div id="toast-container"></div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- FIREBASE SYNC & APPLICATION LOGIC (MODULE)                              -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-/* ─── FIREBASE MANAGER ─────────────────────────────────────────────── */
-const FBM = {
+/* ─── GLOBAL STORES (Safeguards Against Missing References) ─────────── */
+window.AppState = { current: null, history: [], activeMatchId: null };
+const AppState = window.AppState;
+
+window.TournamentManager = { current: null };
+const TournamentManager = window.TournamentManager;
+
+/* ─── DATABASE NORMALIZATION & FIREBASE MANAGER ────────────────────── */
+window.FBM = {
     db: null, auth: null, user: null, basePath: [],
-    unsubscribeTournament: null, unsubscribeBoard: null,
+    
+    unsubMeta: null, unsubTeams: null, unsubMatches: null, unsubBoard: null,
+    syncState: { meta: null, teams: [], matches: [] },
+
     async init() {
         try {
             let firebaseConfig;
-            
             if (typeof __firebase_config !== 'undefined') {
-                // This handles the internal Canvas database preview automatically
                 firebaseConfig = JSON.parse(__firebase_config);
             } else {
                 // 👇👇👇 PASTE YOUR FIREBASE KEYS HERE FOR GITHUB 👇👇👇
-                const firebaseConfig = {
-    apiKey: "AIzaSyDh-hMs96wWzJl2RcjY5vHUoumjgQPTkbY",
-    authDomain: "badminton-scoring-38cfa.firebaseapp.com",
-    projectId: "badminton-scoring-38cfa",
-    storageBucket: "badminton-scoring-38cfa.firebasestorage.app",
-    messagingSenderId: "850473866570",
-    appId: "1:850473866570:web:8c7b28e46d25a1a1129db3"
-  };
+                firebaseConfig = {
+                  apiKey: "AIzaSyDh-hMs96wWzJl2RcjY5vHUoumjgQPTkbY",
+                  authDomain: "badminton-scoring-38cfa.firebaseapp.com",
+                  projectId: "badminton-scoring-38cfa",
+                  storageBucket: "badminton-scoring-38cfa.firebasestorage.app",
+                  messagingSenderId: "850473866570",
+                  appId: "1:850473866570:web:8c7b28e46d25a1a1129db3"
+                };
                 // 👆👆👆 ======================================== 👆👆👆
             }
             
@@ -361,49 +366,126 @@ const FBM = {
             return false;
         }
     },
+
+    async createTournamentData(meta, teams, matches) {
+        if(!this.user) return;
+        const promises = [];
+        promises.push(setDoc(doc(this.db, ...this.basePath, 'tournaments', meta.id), meta));
+        teams.forEach(t => promises.push(setDoc(doc(this.db, ...this.basePath, 'teams', t.id), t)));
+        matches.forEach(m => promises.push(setDoc(doc(this.db, ...this.basePath, 'matches', m.id), m)));
+        await Promise.all(promises);
+    },
+
+    async updateTournamentPhase(meta, newTeams, newMatches) {
+        if(!this.user) return;
+        const promises = [];
+        promises.push(setDoc(doc(this.db, ...this.basePath, 'tournaments', meta.id), meta));
+        newTeams.forEach(t => promises.push(setDoc(doc(this.db, ...this.basePath, 'teams', t.id), t)));
+        newMatches.forEach(m => promises.push(setDoc(doc(this.db, ...this.basePath, 'matches', m.id), m)));
+        await Promise.all(promises);
+    },
+
+    async saveMatchMeta(match) {
+        if(!this.user || !match || !match.id) return;
+        try { await setDoc(doc(this.db, ...this.basePath, 'matches', match.id), match); } catch(e){}
+    },
+
+    async saveMatchDetail(matchId, state) {
+        if(!this.user || !matchId || !state) return;
+        try { await setDoc(doc(this.db, ...this.basePath, 'match_details', matchId), state); } catch(e){}
+    },
+
+    async archiveTournament(tourneyId) {
+        if (!this.user || !tourneyId) return;
+        try {
+            const d = await getDoc(doc(this.db, ...this.basePath, 'tournaments', tourneyId));
+            if (d.exists()) {
+                const meta = d.data();
+                meta.status = 'completed';
+                meta.endTime = Date.now();
+                await setDoc(doc(this.db, ...this.basePath, 'tournaments', tourneyId), meta);
+            }
+        } catch(e){}
+    },
+
     startTournamentSync(tourneyId, onUpdate) {
         if (!this.user || !tourneyId) return;
-        if (this.unsubscribeTournament) this.unsubscribeTournament();
-        this.unsubscribeTournament = onSnapshot(doc(this.db, ...this.basePath, 'tournaments', tourneyId), (d) => {
-            onUpdate(d.exists() && !d.data()._deleted ? d.data() : null);
-        }, (err) => console.error(err));
+        
+        if (this.unsubMeta) this.unsubMeta();
+        if (this.unsubTeams) this.unsubTeams();
+        if (this.unsubMatches) this.unsubMatches();
+
+        const triggerHydrate = () => {
+            if (this.syncState.meta) {
+                const tTeams = this.syncState.teams.filter(t => t.tournamentId === tourneyId);
+                const tMatches = this.syncState.matches.filter(m => m.tournamentId === tourneyId);
+                onUpdate(TournamentManager.hydrate(this.syncState.meta, tTeams, tMatches));
+            } else {
+                onUpdate(null);
+            }
+        };
+
+        this.unsubMeta = onSnapshot(doc(this.db, ...this.basePath, 'tournaments', tourneyId), (d) => {
+            this.syncState.meta = d.exists() && !d.data()._deleted ? d.data() : null;
+            triggerHydrate();
+        });
+
+        this.unsubTeams = onSnapshot(collection(this.db, ...this.basePath, 'teams'), (snap) => {
+            const arr = []; snap.forEach(d => arr.push(d.data()));
+            this.syncState.teams = arr;
+            triggerHydrate();
+        });
+
+        this.unsubMatches = onSnapshot(collection(this.db, ...this.basePath, 'matches'), (snap) => {
+            const arr = []; snap.forEach(d => arr.push(d.data()));
+            this.syncState.matches = arr;
+            triggerHydrate();
+        });
     },
-    async saveTournament(tourney) {
-        if (!this.user || !tourney || !tourney.id) return;
-        try { await setDoc(doc(this.db, ...this.basePath, 'tournaments', tourney.id), tourney); } catch(e){}
-    },
-    async saveTournamentToHistory(tourney) {
-        if (!this.user || !tourney || !tourney.id) return;
-        try { await setDoc(doc(this.db, ...this.basePath, 'tournament_history', tourney.id), tourney); } catch(e){}
-    },
+
     async getHistory() {
         if (!this.user) return [];
         try {
-            const snapshot = await getDocs(collection(this.db, ...this.basePath, 'tournament_history'));
+            const snapshot = await getDocs(collection(this.db, ...this.basePath, 'tournaments'));
             const hist = [];
-            snapshot.forEach(doc => hist.push(doc.data()));
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                if (!data._deleted && data.status === 'completed') hist.push(data);
+            });
             return hist.sort((a,b) => (b.endTime || 0) - (a.endTime || 0));
         } catch(e) { return []; }
     },
-    async saveMatch(matchId, state) {
-        if (!this.user || !matchId || !state) return;
-        try { await setDoc(doc(this.db, ...this.basePath, 'live_matches', matchId), state); } catch(e){}
-    },
-    async getMatch(matchId) {
+
+    async getMatchDetail(matchId) {
         if (!this.user || !matchId) return null;
         try { 
-            const d = await getDoc(doc(this.db, ...this.basePath, 'live_matches', matchId));
+            const d = await getDoc(doc(this.db, ...this.basePath, 'match_details', matchId));
             return d.exists() ? d.data() : null;
         } catch(e){ return null; }
     },
+
+    async getAllMatchDetailsForTournament(tourneyId) {
+         if (!this.user || !tourneyId) return {};
+         try {
+             const snap = await getDocs(collection(this.db, ...this.basePath, 'match_details'));
+             const detailsMap = {};
+             snap.forEach(d => {
+                 const data = d.data();
+                 if (data.tournamentId === tourneyId) detailsMap[d.id] = data;
+             });
+             return detailsMap;
+         } catch(e) { return {}; }
+    },
+
     startBoardSync(matchId, onUpdate) {
         if (!this.user || !matchId) return;
-        if (this.unsubscribeBoard) this.unsubscribeBoard();
-        this.unsubscribeBoard = onSnapshot(doc(this.db, ...this.basePath, 'live_matches', matchId), (d) => {
+        if (this.unsubBoard) this.unsubBoard();
+        this.unsubBoard = onSnapshot(doc(this.db, ...this.basePath, 'match_details', matchId), (d) => {
             if (d.exists()) onUpdate(d.data());
         }, (err) => console.error(err));
     }
 };
+const FBM = window.FBM;
 
 /* ─── CONSTANTS & UTILS ────────────────────────────────────────────── */
 const LS_STATE_KEY = 'LIVE_SCORE_STATE_V4';
@@ -559,12 +641,11 @@ const DisplayManager = {
 };
 
 
-/* ─── STATE & TOURNAMENT MANAGEMENT ────────────────────────────────── */
-const AppState = {
-  current: null, history: [], activeMatchId: null,
+/* ─── TOURNAMENT MANAGEMENT CONTINUED ──────────────────────────────── */
+Object.assign(AppState, {
   save() { 
       try { localStorage.setItem(LS_STATE_KEY, JSON.stringify(this.current)); } catch (e) {} 
-      if (this.activeMatchId) FBM.saveMatch(this.activeMatchId, this.current);
+      if (this.activeMatchId) FBM.saveMatchDetail(this.activeMatchId, this.current);
   },
   load() {
       try { const raw = localStorage.getItem(LS_STATE_KEY); if (raw) this.current = JSON.parse(raw); } catch (e) { this.current = null; }
@@ -577,17 +658,17 @@ const AppState = {
   update(fn, actionDesc = 'Update') { const next = cloneState(this.current); fn(next); next.timestamp = Date.now(); this.push(next, actionDesc); },
   undo() { if (this.history.length > 0) { const last = this.history.pop(); this.current = last.state; this.save(); Toast.show(`Undid: ${last.desc}`); return true; } return false; },
   clear() { this.current = null; this.history = []; this.activeMatchId = null; localStorage.removeItem(LS_STATE_KEY); }
-};
+});
 
-const TournamentManager = {
-  current: null,
+Object.assign(TournamentManager, {
   save() { 
       try { localStorage.setItem('TOURNAMENT_STATE_V4', JSON.stringify(this.current)); } catch(e){} 
-      FBM.saveTournament(this.current);
   },
+
   loadLocalFallback() { 
       try { const raw = localStorage.getItem('TOURNAMENT_STATE_V4'); if(raw) this.current = JSON.parse(raw); } catch(e) { this.current = null; } return this.current; 
   },
+
   async archiveCurrent() {
       if (!this.current) return;
       this.current.endTime = Date.now();
@@ -596,25 +677,91 @@ const TournamentManager = {
           hist.push(this.current);
           localStorage.setItem('TOURNAMENT_HISTORY_V4', JSON.stringify(hist));
       } catch(e){}
-      if (FBM.user) await FBM.saveTournamentToHistory(this.current);
-      this.clear();
+
+      if (FBM.user) await FBM.archiveTournament(this.current.id);
+      
+      this.current = null; 
+      localStorage.removeItem('TOURNAMENT_STATE_V4'); 
+      localStorage.removeItem('ACTIVE_TOURNEY_ID');
   },
+
   clear() { 
       if (this.current && this.current.id) {
-          FBM.saveTournament({ id: this.current.id, _deleted: true });
+          try {
+              let tMeta = { id: this.current.id, _deleted: true };
+              FBM.db ? setDoc(doc(FBM.db, ...FBM.basePath, 'tournaments', this.current.id), tMeta) : null;
+          } catch(e){}
       }
       this.current = null; 
       localStorage.removeItem('TOURNAMENT_STATE_V4'); 
       localStorage.removeItem('ACTIVE_TOURNEY_ID');
   },
   
-  createMatch(id, t1, t2, roundLabel, isBye = false) { 
-      return { 
-          id, teamA: t1, teamB: t2, status: isBye ? 'completed' : 'pending', 
-          round: roundLabel, scoreA: 0, scoreB: 0, winnerId: isBye ? (t1 ? t1.id : (t2 ? t2.id : null)) : null, 
-          fullState: null, isBye: isBye 
-      }; 
+  hydrate(meta, teams, matches) {
+      if(!meta) return null;
+      const t = { ...meta, teams: teams, groups: [], koMatches: [] };
+      
+      const teamMap = {};
+      teams.forEach(tm => teamMap[tm.id] = tm);
+
+      if (meta.format === 'groups') {
+          const groupMap = {};
+          for(let i=0; i<meta.numGroups; i++) {
+              const gId = String.fromCharCode(65+i);
+              groupMap[gId] = { id: gId, teams: [], matches: [] };
+              t.groups.push(groupMap[gId]);
+          }
+          teams.forEach(tm => {
+              if(tm.groupId && groupMap[tm.groupId]) {
+                  groupMap[tm.groupId].teams.push({ ...tm, played: 0, wins: 0 });
+              }
+          });
+          matches.forEach(m => {
+              if (m.type === 'group' && groupMap[m.groupId]) {
+                  m.teamA = teamMap[m.teamAId] || null;
+                  m.teamB = teamMap[m.teamBId] || null;
+                  groupMap[m.groupId].matches.push(m);
+              }
+          });
+          
+          t.groups.forEach(g => g.matches.sort((a,b) => a.matchNum - b.matchNum));
+          this._updateStandingsInMemory(t);
+      }
+
+      const koMatches = matches.filter(m => m.type === 'ko').sort((a,b) => a.matchNum - b.matchNum);
+      if (koMatches.length > 0) {
+          let maxRound = 0;
+          koMatches.forEach(m => { if(m.roundIndex > maxRound) maxRound = m.roundIndex; });
+          t.koMatches = Array.from({length: maxRound + 1}, () => []);
+          koMatches.forEach(m => {
+              m.teamA = teamMap[m.teamAId] || null;
+              m.teamB = teamMap[m.teamBId] || null;
+              t.koMatches[m.roundIndex][m.matchIndex] = m;
+          });
+      }
+
+      return t;
   },
+
+  _updateStandingsInMemory(t) {
+      if (!t || !t.groups) return;
+      t.groups.forEach(g => {
+          g.teams.forEach(tm => { tm.played = 0; tm.wins = 0; });
+          g.matches.forEach(m => {
+              if (m.status === 'completed' && m.winnerId) {
+                  const tA = g.teams.find(x => x.id === m.teamAId);
+                  const tB = g.teams.find(x => x.id === m.teamBId);
+                  if(tA && m.teamAId) tA.played++; 
+                  if(tB && m.teamBId) tB.played++;
+                  if(m.winnerId === m.teamAId && tA) tA.wins++;
+                  else if (m.winnerId === m.teamBId && tB) tB.wins++;
+              }
+          });
+          g.teams.sort((a,b) => b.wins - a.wins);
+      });
+  },
+
+  _updateStandings() { this._updateStandingsInMemory(this.current); },
 
   _findMatch(matchId) {
       if (!this.current) return null;
@@ -627,29 +774,6 @@ const TournamentManager = {
       return null;
   },
 
-  // 1. Group Stage Generation
-  generateGroups(teams, numGroups, advancePerGroup) {
-      const shuffled = [...teams].sort(() => Math.random() - 0.5);
-      const groups = Array.from({ length: numGroups }, (_, i) => ({
-          id: String.fromCharCode(65 + i), // A, B, C...
-          teams: [], matches: []
-      }));
-
-      shuffled.forEach((p, i) => { groups[i % numGroups].teams.push({ ...p, wins: 0, played: 0 }); });
-
-      groups.forEach(g => {
-          const matches = []; let matchId = 1;
-          for (let i = 0; i < g.teams.length; i++) {
-              for (let j = i + 1; j < g.teams.length; j++) {
-                  matches.push(this.createMatch(`G_${g.id}_${matchId++}`, g.teams[i], g.teams[j], `Group ${g.id}`));
-              }
-          }
-          g.matches = matches;
-      });
-      return groups;
-  },
-
-  // 2. Intelligent BWF Knockout Bracket Generation
   getBracketOrder(size) {
       if (size <= 1) return [0];
       let order = [0, 1];
@@ -661,7 +785,7 @@ const TournamentManager = {
       return order;
   },
 
-  generateBWFKnockout(qualifiedTeams) {
+  generateBWFKnockout(tId, qualifiedTeams) {
       const totalTeams = qualifiedTeams.length;
       const power = totalTeams <= 1 ? 1 : Math.ceil(Math.log2(totalTeams));
       const bracketSize = Math.pow(2, power);
@@ -674,14 +798,18 @@ const TournamentManager = {
           else { const reverseIdx = bracketSize - 1 - (i - bracketSize / 2); slots[order[reverseIdx]] = team; }
       });
 
+      const matchesOut = [];
       let matchCounter = 1; let r1 = [];
       for (let i = 0; i < bracketSize; i += 2) {
           let t1 = slots[i]; let t2 = slots[i + 1];
           let isBye = (!t1 || !t2) && (t1 || t2);
-          const m = this.createMatch(`KO_1_${i / 2}`, t1, t2, `Round 1`, isBye);
-          m.labelA = t1 ? t1.seedLabel : ''; m.labelB = t2 ? t2.seedLabel : '';
-          m.matchNum = matchCounter++;
-          r1.push(m);
+          const m = {
+              id: `KO_1_${i / 2}`, tournamentId: tId, type: 'ko', roundIndex: 0, matchIndex: i / 2, stage: `Round 1`,
+              teamAId: t1 ? t1.id : null, teamBId: t2 ? t2.id : null,
+              status: isBye ? 'completed' : 'pending', scoreA: 0, scoreB: 0, winnerId: isBye ? (t1 ? t1.id : (t2 ? t2.id : null)) : null,
+              labelA: t1 ? t1.seedLabel : '', labelB: t2 ? t2.seedLabel : '', isBye: isBye, matchNum: matchCounter++
+          };
+          r1.push(m); matchesOut.push(m);
       }
 
       let rounds = [r1]; let numMatches = r1.length / 2; let roundNum = 2;
@@ -689,11 +817,14 @@ const TournamentManager = {
           let round = [];
           for (let i = 0; i < numMatches; i++) {
               let prevM1 = rounds[rounds.length - 1][i * 2]; let prevM2 = rounds[rounds.length - 1][i * 2 + 1];
-              const m = this.createMatch(`KO_${roundNum}_${i}`, null, null, `Round ${roundNum}`);
-              m.labelA = prevM1.isBye ? (prevM1.labelA || prevM1.labelB) : `Winner M${prevM1.matchNum}`;
-              m.labelB = prevM2.isBye ? (prevM2.labelA || prevM2.labelB) : `Winner M${prevM2.matchNum}`;
-              m.matchNum = matchCounter++;
-              round.push(m);
+              const m = {
+                  id: `KO_${roundNum}_${i}`, tournamentId: tId, type: 'ko', roundIndex: roundNum - 1, matchIndex: i, stage: `Round ${roundNum}`,
+                  teamAId: null, teamBId: null, status: 'pending', scoreA: 0, scoreB: 0, winnerId: null,
+                  labelA: prevM1.isBye ? (prevM1.labelA || prevM1.labelB) : `Winner M${prevM1.matchNum}`,
+                  labelB: prevM2.isBye ? (prevM2.labelA || prevM2.labelB) : `Winner M${prevM2.matchNum}`,
+                  isBye: false, matchNum: matchCounter++
+              };
+              round.push(m); matchesOut.push(m);
           }
           rounds.push(round); numMatches /= 2; roundNum++;
       }
@@ -701,13 +832,13 @@ const TournamentManager = {
       if (rounds.length > 1) {
           for (let i = 0; i < r1.length; i++) {
               if (r1[i].isBye) {
-                  let nextMatchIndex = Math.floor(i / 2); let nextSlot = i % 2 === 0 ? 'teamA' : 'teamB';
-                  const winnerTeam = r1[i].winnerId === (r1[i].teamA?.id) ? r1[i].teamA : r1[i].teamB;
-                  rounds[1][nextMatchIndex][nextSlot] = winnerTeam;
+                  let nextMatchIndex = Math.floor(i / 2); let nextSlot = i % 2 === 0 ? 'teamAId' : 'teamBId';
+                  const winnerId = r1[i].winnerId;
+                  rounds[1][nextMatchIndex][nextSlot] = winnerId;
               }
           }
       }
-      return rounds;
+      return matchesOut;
   },
 
   completeMatch(matchId, winnerId, scoreA, scoreB, fullState = null) {
@@ -716,39 +847,37 @@ const TournamentManager = {
       if(match) {
           match.status = 'completed'; match.winnerId = winnerId;
           match.scoreA = scoreA; match.scoreB = scoreB;
-          if(fullState) match.fullState = cloneState(fullState);
+          
           this._updateStandings();
           if(this.current.phase === 'ko') this._advanceBracket(match);
-          this.save();
+
+          if (FBM.user) {
+              const flatMatch = { ...match }; delete flatMatch.teamA; delete flatMatch.teamB;
+              FBM.saveMatchMeta(flatMatch);
+              if (fullState) FBM.saveMatchDetail(matchId, fullState);
+          } else {
+              if (fullState) match.fullState = cloneState(fullState);
+              this.save();
+          }
       }
   },
 
   simulateWin(matchId, winnerId) {
       let match = this._findMatch(matchId); if (!match) return;
       match.status = 'completed'; match.winnerId = winnerId;
-      match.scoreA = match.teamA?.id === winnerId ? 21 : 0;
-      match.scoreB = match.teamB?.id === winnerId ? 21 : 0;
+      match.scoreA = match.teamAId === winnerId ? 21 : 0;
+      match.scoreB = match.teamBId === winnerId ? 21 : 0;
+      
       this._updateStandings();
       if (this.current.phase === 'ko') this._advanceBracket(match);
-      this.save(); Router.render();
-  },
-  
-  _updateStandings() {
-      if (!this.current || !this.current.groups) return;
-      this.current.groups.forEach(g => {
-          g.teams.forEach(t => { t.played = 0; t.wins = 0; });
-          g.matches.forEach(m => {
-              if (m.status === 'completed' && m.winnerId) {
-                  const tA = g.teams.find(t => t.id === m.teamA?.id);
-                  const tB = g.teams.find(t => t.id === m.teamB?.id);
-                  if(tA && m.teamA) tA.played++; 
-                  if(tB && m.teamB) tB.played++;
-                  if(m.winnerId === m.teamA?.id && tA) tA.wins++;
-                  else if (m.winnerId === m.teamB?.id && tB) tB.wins++;
-              }
-          });
-          g.teams.sort((a,b) => b.wins - a.wins);
-      });
+      
+      if (FBM.user) {
+          const flatMatch = { ...match }; delete flatMatch.teamA; delete flatMatch.teamB;
+          FBM.saveMatchMeta(flatMatch);
+      } else {
+          this.save(); 
+      }
+      Router.render();
   },
   
   _advanceBracket(completedMatch) {
@@ -758,16 +887,20 @@ const TournamentManager = {
       if(rIdx !== -1 && rIdx < rounds.length - 1) {
           const nextRoundIdx = rIdx + 1; const nextMatchIdx = Math.floor(mIdx / 2); const isTeamA = mIdx % 2 === 0;
           let nextMatch = rounds[nextRoundIdx][nextMatchIdx]; 
-          const winnerTeam = completedMatch.status === 'completed' ? (completedMatch.winnerId === completedMatch.teamA?.id ? completedMatch.teamA : completedMatch.teamB) : null;
+          const winnerId = completedMatch.status === 'completed' ? completedMatch.winnerId : null;
           
-          if(isTeamA) nextMatch.teamA = winnerTeam; else nextMatch.teamB = winnerTeam;
-          if (!winnerTeam && nextMatch.status === 'completed' && !nextMatch.isBye) { 
+          if(isTeamA) nextMatch.teamAId = winnerId; else nextMatch.teamBId = winnerId;
+          if (!winnerId && nextMatch.status === 'completed' && !nextMatch.isBye) { 
               nextMatch.status = 'pending'; nextMatch.winnerId = null; this._advanceBracket(nextMatch); 
           }
-          // Fast-forward byes in next rounds
-          if (nextMatch.isBye && winnerTeam) {
-              nextMatch.winnerId = winnerTeam.id;
+          if (nextMatch.isBye && winnerId) {
+              nextMatch.winnerId = winnerId;
               this._advanceBracket(nextMatch);
+          }
+
+          if (FBM.user) {
+              const flatNextMatch = { ...nextMatch }; delete flatNextMatch.teamA; delete flatNextMatch.teamB;
+              FBM.saveMatchMeta(flatNextMatch);
           }
       }
   },
@@ -782,21 +915,27 @@ const TournamentManager = {
       this.current.groups.forEach(g => {
           const topN = g.teams.slice(0, this.current.advanceCount);
           topN.forEach((team, rank) => {
-              qualified.push({ ...team, groupRank: rank + 1, groupName: g.id, seedLabel: `${getRankText(rank + 1)} Grp ${g.id}` });
+              qualified.push({ ...team, groupRank: rank + 1, seedLabel: `${getRankText(rank + 1)} Grp ${g.id}` });
           });
       });
 
-      // BWF standard sorting: group winners vs lower ranks
       qualified.sort((a, b) => a.groupRank - b.groupRank);
       
       this.current.phase = 'ko'; 
-      this.current.koMatches = this.generateBWFKnockout(qualified);
-      this.save();
+      const newMatches = this.generateBWFKnockout(this.current.id, qualified);
+      
+      if (FBM.user) {
+          const meta = { id: this.current.id, name: this.current.name, format: this.current.format, phase: 'ko', numGroups: this.current.numGroups, advanceCount: this.current.advanceCount, settings: this.current.settings, status: 'active', createdAt: this.current.createdAt || Date.now() };
+          FBM.updateTournamentPhase(meta, qualified, newMatches);
+      } else {
+          this.current.koMatches = this.hydrate(this.current, this.current.teams, newMatches).koMatches;
+          this.save();
+      }
   }
-};
+});
 
 /* ─── ROUTER & RENDERER ────────────────────────────────────────────── */
-const Router = {
+window.Router = {
   currentView: 'home',
   async init() {
     const app = qs('#app');
@@ -812,8 +951,17 @@ const Router = {
         const historyTourneyId = window.__FORCE_HISTORY_TOURNEY_ID || params.get('historyTourneyId') || null;
         if (historyTourneyId) {
              if (FBM.user) {
-                 const d = await getDoc(doc(FBM.db, ...FBM.basePath, 'tournament_history', historyTourneyId));
-                 if(d.exists()) window.__HISTORY_DATA = d.data();
+                 const d = await getDoc(doc(FBM.db, ...FBM.basePath, 'tournaments', historyTourneyId));
+                 if(d.exists()) {
+                     const tTeamsSnap = await getDocs(collection(FBM.db, ...FBM.basePath, 'teams'));
+                     const tTeams = []; tTeamsSnap.forEach(t => { if(t.data().tournamentId === historyTourneyId) tTeams.push(t.data()); });
+                     
+                     const tMatchesSnap = await getDocs(collection(FBM.db, ...FBM.basePath, 'matches'));
+                     const tMatches = []; tMatchesSnap.forEach(m => { if(m.data().tournamentId === historyTourneyId) tMatches.push(m.data()); });
+
+                     window.__HISTORY_DATA = TournamentManager.hydrate(d.data(), tTeams, tMatches);
+                     window.__HISTORY_DETAILS_MAP = await FBM.getAllMatchDetailsForTournament(historyTourneyId);
+                 }
              } else {
                  try { 
                      const hist = JSON.parse(localStorage.getItem('TOURNAMENT_HISTORY_V4') || '[]'); 
@@ -822,7 +970,6 @@ const Router = {
              }
         }
         
-        // Handle loading specific tournament via URL parameter or local storage
         if (params.get('tid')) localStorage.setItem('ACTIVE_TOURNEY_ID', params.get('tid'));
     } catch(e){}
 
@@ -842,7 +989,6 @@ const Router = {
                 }
             });
         } else {
-            // No active tournament ID saved yet, still allow rendering home/history
             if (this.currentView === 'tournament' || this.currentView === 'home' || this.currentView === 'history') {
                 this.render();
             }
@@ -852,14 +998,16 @@ const Router = {
             this.render(); 
             FBM.startBoardSync(AppState.activeMatchId, (state) => { AppState.current = state; this.render(); });
         } else if (this.currentView === 'print' && AppState.activeMatchId) {
-             const state = await FBM.getMatch(AppState.activeMatchId);
+             const state = await FBM.getMatchDetail(AppState.activeMatchId);
              if (state) AppState.current = state;
              this.render(); setTimeout(() => window.print(), 1000);
         } else if (this.currentView === 'print' || this.currentView === 'tournament_print') {
+             if (TournamentManager.current) {
+                 window.__HISTORY_DETAILS_MAP = await FBM.getAllMatchDetailsForTournament(TournamentManager.current.id);
+             }
              this.render(); setTimeout(() => window.print(), 2000);
         } else { this.render(); }
     } else {
-        // Fallback for offline or invalid Firebase Config
         TournamentManager.loadLocalFallback(); AppState.load();
         if (this.currentView === 'board') {
              setInterval(() => {
@@ -899,6 +1047,7 @@ const Router = {
     }
   }
 };
+const Router = window.Router;
 
 const Renderer = {
   renderHome(container) {
@@ -906,7 +1055,6 @@ const Renderer = {
     home.appendChild(el('div', { className: 'home-logo' }, ['LiveScore Pro']));
     home.appendChild(el('div', { className: 'home-tagline' }, ['Ultimate Bracket Edition']));
     
-    // --- NEW: Join Tournament UI ---
     const joinSection = el('div', { className: 'card flex flex-col items-center mt-lg mb-md', style: {maxWidth: '600px', width: '100%', background: 'rgba(79, 195, 247, 0.05)', borderColor: 'var(--accent-primary)'} });
     joinSection.appendChild(el('div', { className: 'text-lg', style: {fontWeight: 'bold', marginBottom: '8px', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '1px'} }, ['Umpire / Join Match']));
     joinSection.appendChild(el('div', { className: 'text-sm text-secondary mb-md' }, ['Enter the Tournament ID provided by the organizer to officiate matches.']));
@@ -917,7 +1065,7 @@ const Renderer = {
         if(id) {
             localStorage.setItem('ACTIVE_TOURNEY_ID', id);
             Router.navigate('tournament');
-            window.location.reload(); // Quick refresh to re-bind listeners properly to new ID
+            window.location.reload(); 
         } else {
             Toast.show('Please enter a valid Tournament ID', 2000);
         }
@@ -963,7 +1111,6 @@ const HistoryHub = {
 
         listWrap.innerHTML = '';
         
-        // Render Active Tournament at the top if one exists
         const activeT = TournamentManager.current;
         if (activeT) {
             const card = el('div', { className: 'card flex flex-col gap-md', style: { border: '2px solid var(--accent-success)', background: 'rgba(102, 187, 106, 0.05)' } });
@@ -989,7 +1136,6 @@ const HistoryHub = {
             return; 
         }
 
-        // Render completed history
         if (hist.length > 0) {
             const histTitle = el('div', { className: 'text-sm text-muted mt-md mb-sm', style: { fontWeight: 'bold', textTransform: 'uppercase' } }, ['Completed Tournaments']);
             listWrap.appendChild(histTitle);
@@ -1137,30 +1283,66 @@ const TournamentHub = {
 
   _initTournament() {
       const s = this.setupState; const teams = s.teams.filter(t => t.name.trim() !== '');
-      if(teams.length < 2) { CustomAlert.show('At least 2 valid teams required!', 'error'); return; }
+      const reqTeams = s.format === 'groups' ? (s.numGroups * s.advanceCount) : 2;
+      
+      if(teams.length < reqTeams) { 
+          CustomAlert.show(`At least ${reqTeams} valid teams required!`, 'error'); 
+          return; 
+      }
+      
+      const tourneyId = Math.random().toString(36).slice(2, 8).toUpperCase();
       
       teams.forEach(t => {
+          t.tournamentId = tourneyId;
           const needed = s.settings.matchType === 'doubles' ? 2 : 1;
           for(let i=0; i<needed; i++) if(!t.players[i] || !t.players[i].name.trim()) t.players[i] = { id: uid(), name: `${t.name} P${i+1}` };
       });
 
-      // Generate a user friendly 6-character Tournament ID
-      const tourneyId = Math.random().toString(36).slice(2, 8).toUpperCase();
-
-      const tourney = {
+      const meta = {
           id: tourneyId, name: s.name || 'Unnamed Tournament', format: s.format, phase: s.format === 'groups' ? 'rr' : 'ko', 
-          numGroups: s.numGroups, advanceCount: s.advanceCount, teams: teams, settings: s.settings, groups: [], koMatches: []
+          numGroups: s.numGroups, advanceCount: s.advanceCount, settings: s.settings, status: 'active', createdAt: Date.now()
       };
 
-      if(tourney.phase === 'rr') tourney.groups = TournamentManager.generateGroups(teams, tourney.numGroups, tourney.advanceCount); 
-      else {
+      let matches = [];
+      if(meta.phase === 'rr') {
+          const shuffled = [...teams].sort(() => Math.random() - 0.5);
+          const groups = Array.from({ length: meta.numGroups }, (_, i) => ({ id: String.fromCharCode(65 + i), teams: [] }));
+          shuffled.forEach((p, i) => { 
+              p.groupId = groups[i % meta.numGroups].id; 
+              groups[i % meta.numGroups].teams.push(p); 
+          });
+
+          let matchCounter = 1;
+          groups.forEach(g => {
+              for (let i = 0; i < g.teams.length; i++) {
+                  for (let j = i + 1; j < g.teams.length; j++) {
+                      matches.push({
+                          id: `G_${g.id}_${matchCounter++}`, tournamentId: tourneyId, type: 'group', groupId: g.id, stage: `Group ${g.id}`,
+                          teamAId: g.teams[i].id, teamBId: g.teams[j].id, status: 'pending', scoreA: 0, scoreB: 0, winnerId: null, matchNum: matchCounter
+                      });
+                  }
+              }
+          });
+      } else {
           const qualified = teams.map((t, i) => ({ ...t, seedLabel: `Seed ${i+1}` }));
-          tourney.koMatches = TournamentManager.generateBWFKnockout(qualified);
+          matches = TournamentManager.generateBWFKnockout(tourneyId, qualified);
       }
 
-      TournamentManager.current = tourney; 
+      TournamentManager.current = TournamentManager.hydrate(meta, teams, matches);
       localStorage.setItem('ACTIVE_TOURNEY_ID', tourneyId);
-      TournamentManager.save();
+
+      if (FBM.user) {
+          FBM.createTournamentData(meta, teams, matches);
+          
+          FBM.startTournamentSync(tourneyId, (tourney) => {
+              TournamentManager.current = tourney;
+              if (Router.currentView === 'tournament' && !tourney) Router.navigate('home');
+              else if (Router.currentView === 'tournament') Router.render();
+          });
+      } else {
+          TournamentManager.save();
+      }
+
       Toast.show('Tournament Generated!'); 
       Router.render();
   },
@@ -1243,7 +1425,6 @@ const TournamentHub = {
           return mSel;
       };
 
-      // 1. Group Stage Matches
       if (t.groups && t.groups.length > 0) {
           t.groups.forEach(g => {
               const card = el('div', { className: 'group-card' });
@@ -1260,7 +1441,6 @@ const TournamentHub = {
           });
       }
       
-      // 2. Knockout Matches
       if (t.koMatches && t.koMatches.length > 0) {
           const koCard = el('div', { className: 'group-card', style: { gridColumn: '1 / -1' } });
           koCard.appendChild(el('div', { className: 'group-header', style: {background: 'rgba(79, 195, 247, 0.15)', color: 'var(--accent-primary)'} }, [
@@ -1275,7 +1455,7 @@ const TournamentHub = {
               const roundName = isFinal ? 'Final' : (rIndex === t.koMatches.length - 2 ? 'Semi-Finals' : `Round ${rIndex + 1}`);
 
               round.forEach(m => {
-                  if (m.isBye) return; // Hide byes from schedule
+                  if (m.isBye) return;
                   hasKOMatches = true;
                   
                   const wrapBlock = el('div', { style: {display: 'flex', flexDirection: 'column', height: '100%'} });
@@ -1362,9 +1542,9 @@ const TournamentHub = {
           bRound.appendChild(el('div', { className: 'round-title' }, [roundName]));
 
           round.forEach(m => {
-              const isP1Win = m.winnerId && m.teamA && m.teamA.id === m.winnerId;
-              const isP2Win = m.winnerId && m.teamB && m.teamB.id === m.winnerId;
-              const isLive = AppState.activeMatchId === m.id && m.status === 'live';
+              const isP1Win = m.winnerId && m.teamAId && m.teamAId === m.winnerId;
+              const isP2Win = m.winnerId && m.teamBId && m.teamBId === m.winnerId;
+              const isLive = window.AppState && window.AppState.activeMatchId === m.id && m.status === 'live';
               
               const kMatch = el('div', { className: 'ko-match' + (isLive ? ' active' : '') });
               
@@ -1387,7 +1567,6 @@ const TournamentHub = {
 
               if (m.isBye) { kMatch.appendChild(el('div', { className: 'bye-tag' }, ['BYE'])); }
               else {
-                  // Add play button inside bracket
                   const actionsRow = el('div', { className: 'no-print', style: { padding: '4px', textAlign: 'center', background: 'rgba(0,0,0,0.3)', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px' } });
                   if (m.status === 'completed') actionsRow.appendChild(el('span', {className:'text-xs text-success', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['Completed']));
                   else if (!m.teamA || !m.teamB) actionsRow.appendChild(el('span', {className:'text-xs text-muted'}, ['Pending Teams']));
@@ -1460,7 +1639,7 @@ const TournamentHub = {
           const receivingSide = servingSide === 'A' ? 'B' : 'A';
 
           const state = {
-              id: uid(), sport: 'badminton', matchType: c.matchType, bestOf: c.bestOf,
+              id: match.id, sport: 'badminton', matchType: c.matchType, bestOf: c.bestOf,
               settings: { pointsToWin: c.pointsToWin, deuceEnabled: c.deuceEnabled, deuceCap: c.deuceCap },
               sides: { 
                   A: { id: match.teamA.id, name: match.teamA.name, shortCode: autoShortCode(match.teamA.name), color: '#1a73e8', players: cloneState(match.teamA.players) }, 
@@ -1483,7 +1662,14 @@ const TournamentHub = {
           if (otherReceiverPlayer && c.matchType === 'doubles') state.courtPositions[receivingSide].left = otherReceiverPlayer.id;
 
           state.currentServer = serverId; state.currentReceiver = receiverId;
-          match.status = 'live'; TournamentManager.save();
+          
+          if (FBM.user) {
+              const flatMatch = { ...match }; delete flatMatch.teamA; delete flatMatch.teamB;
+              flatMatch.status = 'live'; FBM.saveMatchMeta(flatMatch);
+          } else {
+              match.status = 'live'; TournamentManager.save();
+          }
+
           AppState.activeMatchId = match.id; AppState.push(state, `Match: ${match.teamA.name} vs ${match.teamB.name}`);
           overlay.remove(); Router.navigate('control', { matchId: match.id });
       }}, ['Commence Match']));
@@ -1937,8 +2123,8 @@ const TournamentExport = {
             bRound.appendChild(el('div', { className: 'round-title', style:{color: '#000'} }, [roundName]));
 
             round.forEach(m => {
-                const isP1Win = m.winnerId && m.teamA && m.teamA.id === m.winnerId;
-                const isP2Win = m.winnerId && m.teamB && m.teamB.id === m.winnerId;
+                const isP1Win = m.winnerId && m.teamAId && m.teamAId === m.winnerId;
+                const isP2Win = m.winnerId && m.teamBId && m.teamBId === m.winnerId;
                 const kMatch = el('div', { className: 'ko-match' });
                 
                 if(!isFinal) kMatch.appendChild(el('div', {style:{position:'absolute', left:'-20px', top:'50%', transform:'translateY(-50%)', fontSize:'0.6rem', color:'#000', writingMode:'vertical-rl', textOrientation:'mixed', fontWeight:'bold', letterSpacing:'1px'}}, [`M${m.matchNum}`]));
@@ -1966,10 +2152,10 @@ const TournamentExport = {
         wrap.appendChild(bracketSec);
     }
     
-    // --- Detailed Match Results Log ---
+    // --- Detailed Match Results Log (Pulling from Normalized DB Cache) ---
     let completedMatches = [];
     if (t.groups) t.groups.forEach(g => g.matches.forEach(m => { if(m.status==='completed') completedMatches.push({...m, stage: `Group ${g.id}`}); }));
-    if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { if(m.status==='completed' && !m.isBye) completedMatches.push({...m, stage: m.round}); }));
+    if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { if(m.status==='completed' && !m.isBye) completedMatches.push({...m, stage: m.stage}); }));
 
     if (completedMatches.length > 0) {
         const resSec = el('div', { style: { marginBottom: '40px', pageBreakBefore: 'always' } });
@@ -1979,14 +2165,17 @@ const TournamentExport = {
             const mWrap = el('div', { className: 'card', style: { marginBottom: '16px', padding: '16px', border: '1px solid #ccc', breakInside: 'avoid' } });
             
             const mHead = el('div', { style: { display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #eee', paddingBottom: '8px', marginBottom: '12px' } });
-            mHead.appendChild(el('div', { style: { fontWeight: 'bold', fontSize: '1.1rem' } }, [`${m.stage}: ${m.teamA.name} vs ${m.teamB.name}`]));
+            mHead.appendChild(el('div', { style: { fontWeight: 'bold', fontSize: '1.1rem' } }, [`${m.stage}: ${m.teamA?.name || 'TBA'} vs ${m.teamB?.name || 'TBA'}`]));
             
-            const wName = m.winnerId === m.teamA.id ? m.teamA.name : (m.winnerId === m.teamB.id ? m.teamB.name : 'Unknown');
+            const wName = m.winnerId === m.teamAId ? m.teamA?.name : (m.winnerId === m.teamBId ? m.teamB?.name : 'Unknown');
             mHead.appendChild(el('div', { style: { color: '#2e7d32', fontWeight: 'bold' } }, [`Winner: ${wName} (${m.scoreA} - ${m.scoreB})`]));
             mWrap.appendChild(mHead);
 
-            if (m.fullState && m.fullState.games) {
-                m.fullState.games.forEach((g, i) => {
+            // Fetch detail from the mapped memory cache populated during sync/load
+            const fullState = window.__HISTORY_DETAILS_MAP ? window.__HISTORY_DETAILS_MAP[m.id] : m.fullState;
+
+            if (fullState && fullState.games) {
+                fullState.games.forEach((g, i) => {
                     const gWrap = el('div', { style: { marginTop: '16px', borderTop: '1px solid #eee', paddingTop: '16px' } });
                     gWrap.appendChild(el('div', { style: { fontWeight: 'bold', marginBottom: '8px', color: '#1a73e8' } }, [`Game ${i + 1} — Score: ${g.scoreA} - ${g.scoreB}`]));
 
@@ -2015,7 +2204,7 @@ const TournamentExport = {
                               el('td',{style:{textAlign:'center'}},[pt.serviceCourt || '—']), 
                               el('td',{style:{textAlign:'center'}},[`${pt.rallyDuration !== undefined ? pt.rallyDuration : '-'}s`]), 
                               el('td',{style:{textAlign:'center', fontWeight:'bold', fontSize:'1.1em'}},[`${pt.scoreA} - ${pt.scoreB}`]), 
-                              el('td',{className: 'highlight'},[m.fullState.sides[pt.winner].name]),
+                              el('td',{className: 'highlight'},[fullState.sides[pt.winner].name]),
                               el('td',{style:{color:'#e53935', fontSize:'0.8em', fontWeight:'bold'}},[pt.reason || '—'])
                           ]));
                         });
@@ -2026,7 +2215,7 @@ const TournamentExport = {
                     mWrap.appendChild(gWrap);
                 });
             } else {
-                mWrap.appendChild(el('div', { style: { color: '#78909c', fontSize: '0.9rem', fontStyle: 'italic', marginTop: '10px' } }, ['Match simulated (No point-by-point details available).']));
+                mWrap.appendChild(el('div', { style: { color: '#78909c', fontSize: '0.9rem', fontStyle: 'italic', marginTop: '10px' } }, ['Match simulated manually (No point-by-point timeline available).']));
             }
             resSec.appendChild(mWrap);
         });
