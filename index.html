@@ -178,7 +178,7 @@ input:focus, select:focus { border-color: var(--accent-primary); box-shadow: 0 0
 .groups-table th { background: rgba(0,0,0,0.2); color: var(--text-muted); text-transform: uppercase; font-size: 0.75rem; }
 .advancing-row { background: rgba(102, 187, 106, 0.1); }
 .match-list { padding: 1rem; background: var(--bg-elevated); flex-grow: 1; overflow-y: auto; max-height: 350px; }
-.match-selector { background: var(--bg-card); border: 1px solid rgba(255,255,255,0.05); border-radius: var(--radius-sm); margin-bottom: 0.75rem; overflow: hidden; box-shadow: var(--shadow-sm); }
+.match-selector { background: var(--bg-card); border: 1px solid rgba(255,255,255,0.05); border-radius: var(--radius-sm); margin-bottom: 0.75rem; overflow: hidden; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; }
 .match-team { padding: 0.75rem 1rem; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; font-size: 0.875rem; }
 .match-team:last-child { border-bottom: none; }
 .match-team:hover { background: rgba(255,255,255,0.03); }
@@ -338,6 +338,7 @@ window.FBM = {
                   storageBucket: "badminton-scoring-38cfa.firebasestorage.app",
                   messagingSenderId: "850473866570",
                   appId: "1:850473866570:web:8c7b28e46d25a1a1129db3"
+
                 };
                 // 👆👆👆 ======================================== 👆👆👆
             }
@@ -785,7 +786,60 @@ Object.assign(TournamentManager, {
       return order;
   },
 
-  generateBWFKnockout(tId, qualifiedTeams) {
+  // PROFESSIONAL ROUND ROBIN GENERATOR (CIRCLE METHOD & INTERLEAVING)
+  generateGroupMatches(tourneyId, groupsArray) {
+      const matches = [];
+      let maxRounds = 0;
+      const groupRounds = {};
+
+      groupsArray.forEach(g => {
+          const teamIds = g.teams.map(t => t.id);
+          if (teamIds.length % 2 !== 0) teamIds.push(null); // Dummy for bye
+          const numRounds = teamIds.length - 1;
+          const halfSize = teamIds.length / 2;
+          groupRounds[g.id] = [];
+          
+          if (numRounds > maxRounds) maxRounds = numRounds;
+
+          let currentTeamIds = [...teamIds];
+          for (let r = 0; r < numRounds; r++) {
+              const roundMatches = [];
+              for (let i = 0; i < halfSize; i++) {
+                  const home = currentTeamIds[i];
+                  const away = currentTeamIds[currentTeamIds.length - 1 - i];
+                  if (home !== null && away !== null) {
+                      roundMatches.push({ home, away });
+                  }
+              }
+              groupRounds[g.id].push(roundMatches);
+              
+              // Rotate array: keep first element fixed, shift rest clockwise
+              const first = currentTeamIds[0];
+              const rest = currentTeamIds.slice(1);
+              rest.unshift(rest.pop());
+              currentTeamIds = [first, ...rest];
+          }
+      });
+
+      // Interleave matches across groups to prevent back-to-back
+      let matchCounter = 1;
+      for (let r = 0; r < maxRounds; r++) {
+          groupsArray.forEach(g => {
+              if (groupRounds[g.id] && groupRounds[g.id][r]) {
+                  groupRounds[g.id][r].forEach(pair => {
+                      matches.push({
+                          id: `G_${g.id}_${matchCounter}`, tournamentId: tourneyId, type: 'group', groupId: g.id, stage: `Group ${g.id} (Round ${r+1})`,
+                          teamAId: pair.home, teamBId: pair.away, status: 'pending', scoreA: 0, scoreB: 0, winnerId: null, matchNum: matchCounter
+                      });
+                      matchCounter++;
+                  });
+              }
+          });
+      }
+      return matches;
+  },
+
+  generateBWFKnockout(tId, qualifiedTeams, startingMatchNum = 1) {
       const totalTeams = qualifiedTeams.length;
       const power = totalTeams <= 1 ? 1 : Math.ceil(Math.log2(totalTeams));
       const bracketSize = Math.pow(2, power);
@@ -799,7 +853,7 @@ Object.assign(TournamentManager, {
       });
 
       const matchesOut = [];
-      let matchCounter = 1; let r1 = [];
+      let matchCounter = startingMatchNum; let r1 = [];
       for (let i = 0; i < bracketSize; i += 2) {
           let t1 = slots[i]; let t2 = slots[i + 1];
           let isBye = (!t1 || !t2) && (t1 || t2);
@@ -921,8 +975,11 @@ Object.assign(TournamentManager, {
 
       qualified.sort((a, b) => a.groupRank - b.groupRank);
       
+      let maxMatchNum = 0;
+      this.current.groups.forEach(g => g.matches.forEach(m => { if(m.matchNum > maxMatchNum) maxMatchNum = m.matchNum; }));
+      
       this.current.phase = 'ko'; 
-      const newMatches = this.generateBWFKnockout(this.current.id, qualified);
+      const newMatches = this.generateBWFKnockout(this.current.id, qualified, maxMatchNum + 1);
       
       if (FBM.user) {
           const meta = { id: this.current.id, name: this.current.name, format: this.current.format, phase: 'ko', numGroups: this.current.numGroups, advanceCount: this.current.advanceCount, settings: this.current.settings, status: 'active', createdAt: this.current.createdAt || Date.now() };
@@ -931,6 +988,7 @@ Object.assign(TournamentManager, {
           this.current.koMatches = this.hydrate(this.current, this.current.teams, newMatches).koMatches;
           this.save();
       }
+      Router.render();
   }
 });
 
@@ -1282,7 +1340,8 @@ const TournamentHub = {
   },
 
   _initTournament() {
-      const s = this.setupState; const teams = s.teams.filter(t => t.name.trim() !== '');
+      const s = this.setupState; const teams = s
+.teams.filter(t => t.name.trim() !== '');
       const reqTeams = s.format === 'groups' ? (s.numGroups * s.advanceCount) : 2;
       
       if(teams.length < reqTeams) { 
@@ -1305,27 +1364,16 @@ const TournamentHub = {
 
       let matches = [];
       if(meta.phase === 'rr') {
-          const shuffled = [...teams].sort(() => Math.random() - 0.5);
           const groups = Array.from({ length: meta.numGroups }, (_, i) => ({ id: String.fromCharCode(65 + i), teams: [] }));
+          const shuffled = [...teams].sort(() => Math.random() - 0.5);
           shuffled.forEach((p, i) => { 
               p.groupId = groups[i % meta.numGroups].id; 
               groups[i % meta.numGroups].teams.push(p); 
           });
-
-          let matchCounter = 1;
-          groups.forEach(g => {
-              for (let i = 0; i < g.teams.length; i++) {
-                  for (let j = i + 1; j < g.teams.length; j++) {
-                      matches.push({
-                          id: `G_${g.id}_${matchCounter++}`, tournamentId: tourneyId, type: 'group', groupId: g.id, stage: `Group ${g.id}`,
-                          teamAId: g.teams[i].id, teamBId: g.teams[j].id, status: 'pending', scoreA: 0, scoreB: 0, winnerId: null, matchNum: matchCounter
-                      });
-                  }
-              }
-          });
+          matches = TournamentManager.generateGroupMatches(tourneyId, groups);
       } else {
           const qualified = teams.map((t, i) => ({ ...t, seedLabel: `Seed ${i+1}` }));
-          matches = TournamentManager.generateBWFKnockout(tourneyId, qualified);
+          matches = TournamentManager.generateBWFKnockout(tourneyId, qualified, 1);
       }
 
       TournamentManager.current = TournamentManager.hydrate(meta, teams, matches);
@@ -1368,9 +1416,9 @@ const TournamentHub = {
       const tabs = el('div', { className: 'tourney-tabs' });
       const tabOptions = [];
       
-      tabOptions.push(['schedule', '📅 Schedule']);
+      tabOptions.push(['schedule', '📅 Master Schedule']);
       if(t.format === 'groups') {
-          tabOptions.push(['standings', '📊 Standings']);
+          tabOptions.push(['groups', '📊 Group Stages']);
       }
       tabOptions.push(['bracket', '🏆 Knockout Bracket']);
       
@@ -1379,106 +1427,80 @@ const TournamentHub = {
       wrap.appendChild(tabs);
 
       if(this.activeTab === 'schedule') wrap.appendChild(this._renderSchedule(t));
-      if(this.activeTab === 'standings') wrap.appendChild(this._renderStandings(t));
+      if(this.activeTab === 'groups') wrap.appendChild(this._renderGroupsTab(t));
       if(this.activeTab === 'bracket') wrap.appendChild(this._renderBracket(t));
       container.appendChild(wrap);
   },
 
-  /* --- SCHEDULE VISUALS (ALL MATCHES) --- */
+  /* --- CHRONOLOGICAL MASTER SCHEDULE --- */
   _renderSchedule(t) {
       const wrap = el('div', { className: 'w-full' });
-      const grid = el('div', { className: 'groups-grid' });
       
-      const createMatchBlock = (m) => {
-          const mSel = el('div', { className: 'match-selector', style: {height: '100%', display: 'flex', flexDirection: 'column'} });
+      let allMatches = [];
+      if (t.groups) t.groups.forEach(g => g.matches.forEach(m => allMatches.push(m)));
+      if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { if (!m.isBye) allMatches.push(m); }));
+      
+      allMatches.sort((a,b) => a.matchNum - b.matchNum);
+
+      if (allMatches.length === 0) {
+          wrap.appendChild(el('div', {className: 'text-muted p-lg text-center card'}, ['No matches available.']));
+          return wrap;
+      }
+
+      const grid = el('div', { className: 'groups-grid' });
+
+      allMatches.forEach(m => {
+          const mSel = el('div', { className: 'match-selector', style: {height: '100%', display: 'flex', flexDirection: 'column', position: 'relative'} });
+          
+          const stageBadge = el('div', {style:{position:'absolute', top:'-10px', left:'10px', background:'var(--bg-primary)', color:'var(--accent-primary)', fontSize:'0.7rem', padding:'2px 8px', borderRadius:'12px', border:'1px solid var(--accent-primary)', fontWeight:'bold', zIndex:'1'}}, [m.stage]);
+          mSel.appendChild(stageBadge);
+
+          const teamWrap = el('div', { style: {flex: 1, marginTop: '8px'} });
           
           const makeTeamRow = (teamObj, label) => {
               const isWin = m.winnerId && teamObj && m.winnerId === teamObj.id;
               const div = el('div', { className: 'match-team' + (isWin ? ' winner' : ''), onClick: () => TournamentManager.simulateWin(m.id, teamObj?.id) });
-              
-              const labelSpan = label ? `<span style="display:block; font-size:0.65rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:2px;">${label}</span>` : '';
-              const nameSpan = `<span>${escapeHTML(teamObj?.name || 'TBD')}</span>`;
-              
+              const labelSpan = label ? `<span style="display:block; font-size:0.6rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:2px;">${label}</span>` : '';
+              const nameSpan = `<span style="font-weight:600;">${escapeHTML(teamObj?.name || 'TBD')}</span>`;
               div.innerHTML = `<div>${labelSpan}${nameSpan}</div>`;
-              if (isWin) div.appendChild(el('span', {}, ['✓']));
+              if (isWin) div.appendChild(el('span', {}, ['🏆']));
               return div;
           };
-          
-          const teamWrap = el('div', { style: {flex: 1} });
+
           teamWrap.appendChild(makeTeamRow(m.teamA, m.labelA));
           teamWrap.appendChild(makeTeamRow(m.teamB, m.labelB));
           mSel.appendChild(teamWrap);
           
           const actionsRow = el('div', { style: { padding: '6px', textAlign: 'center', background: 'rgba(0,0,0,0.2)', marginTop: 'auto' } });
+          
+          const numSpan = el('span', {style:{float:'left', color:'var(--text-muted)', fontSize:'0.7rem', fontWeight:'bold', marginTop:'6px', marginLeft:'4px'}}, [`M${m.matchNum}`]);
+          actionsRow.appendChild(numSpan);
+
           if (m.status === 'completed') {
-              actionsRow.appendChild(el('span', {className:'text-xs', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['Completed']));
+              actionsRow.appendChild(el('span', {className:'text-xs', style:{color: 'var(--accent-success)', fontWeight:'bold', float:'right', marginTop:'4px', marginRight:'8px'}}, ['Completed ✓']));
           } else if (m.status === 'live') {
-              actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 Resume Live Match']));
+              actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto', float:'right'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 Resume Live']));
           } else {
               if (!m.teamA || !m.teamB) {
-                  actionsRow.appendChild(el('span', {className:'text-xs text-muted'}, ['Pending Teams']));
+                  actionsRow.appendChild(el('span', {className:'text-xs text-muted', style:{float:'right', marginTop:'4px', marginRight:'8px'}}, ['Pending Teams']));
               } else {
-                  actionsRow.appendChild(el('button', { className: 'btn btn-ghost btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto', width:'100%'}, onClick: () => this._playTournamentMatch(m.id) }, ['▶ Start Match']));
+                  actionsRow.appendChild(el('button', { className: 'btn btn-primary btn-sm', style: {fontSize: '0.75rem', padding: '4px 12px', minHeight:'auto', float:'right'}, onClick: () => this._playTournamentMatch(m.id) }, ['▶ Start Match']));
               }
           }
+          
+          const clearFix = el('div', {style:{clear:'both'}});
+          actionsRow.appendChild(clearFix);
+
           mSel.appendChild(actionsRow);
-          return mSel;
-      };
-
-      if (t.groups && t.groups.length > 0) {
-          t.groups.forEach(g => {
-              const card = el('div', { className: 'group-card' });
-              card.appendChild(el('div', { className: 'group-header' }, [
-                  el('span', {}, [`Group ${g.id} Matches`])
-              ]));
-              
-              const matchesDiv = el('div', { className: 'match-list', style: {maxHeight: 'none', background: 'transparent', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px'} });
-              g.matches.forEach(m => {
-                  matchesDiv.appendChild(createMatchBlock(m));
-              });
-              card.appendChild(matchesDiv); 
-              grid.appendChild(card);
-          });
-      }
-      
-      if (t.koMatches && t.koMatches.length > 0) {
-          const koCard = el('div', { className: 'group-card', style: { gridColumn: '1 / -1' } });
-          koCard.appendChild(el('div', { className: 'group-header', style: {background: 'rgba(79, 195, 247, 0.15)', color: 'var(--accent-primary)'} }, [
-              el('span', {}, [`Knockout Stage Matches`])
-          ]));
-          
-          const matchesDiv = el('div', { className: 'match-list', style: {maxHeight: 'none', background: 'transparent', padding: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px'} });
-          
-          let hasKOMatches = false;
-          t.koMatches.forEach((round, rIndex) => {
-              const isFinal = rIndex === t.koMatches.length - 1;
-              const roundName = isFinal ? 'Final' : (rIndex === t.koMatches.length - 2 ? 'Semi-Finals' : `Round ${rIndex + 1}`);
-
-              round.forEach(m => {
-                  if (m.isBye) return;
-                  hasKOMatches = true;
-                  
-                  const wrapBlock = el('div', { style: {display: 'flex', flexDirection: 'column', height: '100%'} });
-                  const rHeader = el('div', { style: {fontSize: '0.7rem', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '6px', textAlign: 'center'} }, [`${roundName} - M${m.matchNum}`]);
-                  wrapBlock.appendChild(rHeader);
-                  wrapBlock.appendChild(createMatchBlock(m));
-                  
-                  matchesDiv.appendChild(wrapBlock);
-              });
-          });
-          
-          if (hasKOMatches) {
-              koCard.appendChild(matchesDiv);
-              grid.appendChild(koCard);
-          }
-      }
+          grid.appendChild(mSel);
+      });
 
       wrap.appendChild(grid);
       return wrap;
   },
 
-  /* --- STANDINGS VISUALS --- */
-  _renderStandings(t) {
+  /* --- GROUPS STAGES VISUALS (STANDINGS + SPECIFIC MATCHES) --- */
+  _renderGroupsTab(t) {
       TournamentManager._updateStandings();
       const wrap = el('div', { className: 'w-full' });
       
@@ -1488,7 +1510,7 @@ const TournamentHub = {
               let incomplete = 0; t.groups.forEach(g => g.matches.forEach(m => { if (!m.winnerId) incomplete++; }));
               if (incomplete > 0) CustomAlert.show(`There are ${incomplete} matches without a result. Generating knockouts will use current standings. Proceed?`, 'confirm', () => { TournamentManager.transitionToKnockout(); this.activeTab = 'bracket'; Router.render(); });
               else { TournamentManager.transitionToKnockout(); this.activeTab = 'bracket'; Router.render(); }
-          } }, ['Generate Knockouts ➔']));
+          } }, ['Finalize Groups & Generate Knockouts ➔']));
       }
       wrap.appendChild(actions);
 
@@ -1496,7 +1518,7 @@ const TournamentHub = {
       t.groups.forEach(g => {
           const card = el('div', { className: 'group-card' });
           card.appendChild(el('div', { className: 'group-header' }, [
-              el('span', {}, [`Group ${g.id} Standings`]),
+              el('span', {}, [`Group ${g.id}`]),
               el('span', { className: 'text-xs', style: {background:'rgba(255,255,255,0.2)', padding:'2px 6px', borderRadius:'4px'} }, [`Top ${t.advanceCount} Adv`])
           ]));
           
@@ -1513,6 +1535,26 @@ const TournamentHub = {
               tbody.appendChild(tr);
           });
           table.appendChild(tbody); tableWrap.appendChild(table); card.appendChild(tableWrap);
+          
+          // Match List for this specific group
+          const matchesDiv = el('div', { className: 'match-list', style: {borderTop:'1px solid rgba(255,255,255,0.05)', padding: '16px'} });
+          matchesDiv.appendChild(el('div', {style:{fontSize:'0.8rem', fontWeight:'bold', textTransform:'uppercase', color:'var(--text-muted)', marginBottom:'12px', textAlign:'center'}}, ['Group Matches']));
+
+          g.matches.forEach(m => {
+              const mSel = el('div', { className: 'match-selector', style: {marginBottom: '8px'} });
+              const makeTeamRow = (teamObj) => {
+                  const isWin = m.winnerId && teamObj && m.winnerId === teamObj.id;
+                  const div = el('div', { className: 'match-team' + (isWin ? ' winner' : ''), style: {padding: '8px 12px'}, onClick: () => TournamentManager.simulateWin(m.id, teamObj?.id) });
+                  div.innerHTML = `<span>${escapeHTML(teamObj?.name || 'TBD')}</span>`;
+                  if (isWin) div.appendChild(el('span', {}, ['✓']));
+                  return div;
+              };
+              mSel.appendChild(makeTeamRow(m.teamA));
+              mSel.appendChild(makeTeamRow(m.teamB));
+              matchesDiv.appendChild(mSel);
+          });
+
+          card.appendChild(matchesDiv);
           grid.appendChild(card);
       });
       wrap.appendChild(grid);
