@@ -38,6 +38,7 @@ a:hover{text-decoration:underline;}
 /* UTILITY CLASSES                                 */
 /* ═══════════════════════════════════════════════ */
 .hide{display:none!important}
+.print-only{display:none !important;}
 .flex{display:flex}.flex-col{flex-direction:column}.flex-wrap{flex-wrap:wrap}
 .items-center{align-items:center}.justify-center{justify-content:center}.justify-between{justify-content:space-between}
 .gap-xs{gap:4px}.gap-sm{gap:8px}.gap-md{gap:16px}.gap-lg{gap:24px}.gap-xl{gap:32px}
@@ -110,12 +111,6 @@ select.team-dropdown:disabled { opacity: 0.7; cursor: not-allowed; border-color:
 .form-group{display:flex;flex-direction:column;gap:8px; margin-bottom:16px;}
 .form-label{font-size:.85rem;font-weight:600;color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.05em;}
 .form-row{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
-
-.toggle-wrap{display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none; padding:8px 0;}
-.toggle{width:50px;height:28px;border-radius:14px;background:rgba(255,255,255,.1);position:relative;transition:background var(--transition-fast);flex-shrink:0; border:1px solid rgba(255,255,255,0.05);}
-.toggle.on{background:var(--accent-primary); border-color:var(--accent-primary);}
-.toggle::after{content:'';position:absolute;width:20px;height:20px;border-radius:50%;background:#fff;top:3px;left:4px;transition:transform var(--transition-fast), box-shadow var(--transition-fast); box-shadow:0 2px 4px rgba(0,0,0,0.3);}
-.toggle.on::after{transform:translateX(20px);}
 
 /* ═══════════════════════════════════════════════ */
 /* CARDS & PANELS                                  */
@@ -295,32 +290,120 @@ select.team-dropdown:disabled { opacity: 0.7; cursor: not-allowed; border-color:
 .report-table .highlight { font-weight: 700; color: #0288d1 !important;}
 .rally-won { background: #ecfdf5 !important; border-left: 4px solid #2e7d32 !important; }
 
+/* ═══════════════════════════════════════════════ */
+/* GLOBAL PRINT OVERRIDES (LIGHT MODE & VISIBILITY)*/
+/* ═══════════════════════════════════════════════ */
 @media print {
-  body { background: #fff !important; color: #000 !important; padding: 0; margin: 0; font-size: 10pt; }
-  .btn, .control-bar, .tourney-tabs, #toast-container, .no-print, .match-list { display: none !important; }
-  .report-container { box-shadow: none; padding: 0; max-width: 100%; border:none; background:transparent;}
-  .report-table th {background:#f3f4f6 !important; color:#000 !important;}
-  .report-table td, .report-table th {border-color:#ccc !important; color:#000 !important;}
-  .bwf-header {border-color:#000;}
+  /* Core Overrides: Force White Background & Black Text everywhere */
+  body, html, #app, .tournament-hub, .bracket-wrapper, .card, .group-card, .ko-match, .match-selector { 
+      background: #ffffff !important; 
+      color: #000000 !important; 
+      padding: 0; 
+      margin: 0; 
+      font-size: 10pt; 
+      box-shadow: none !important;
+  }
+  
+  * { 
+      color: #000000 !important; 
+      text-shadow: none !important; 
+      box-shadow: none !important; 
+      -webkit-print-color-adjust: exact !important; 
+      print-color-adjust: exact !important; 
+  }
+
+  /* Hide UI Elements during print */
+  /* Hide UI Elements during print */
+  .btn, .control-bar, .tourney-tabs, #toast-container, .no-print, .match-list, select, .wizard-actions { 
+      display: none !important; 
+  }
+  .print-only { 
+      display: inline-block !important; 
+      color: #000000 !important;
+  } 
+      display: none !important; 
+  }
+
+  /* Bracket Specifics for Flow and Printability */
   @page { size: landscape; margin: 10mm; }
   
-  .bracket-wrapper { background: transparent !important; border: none !important; overflow: visible !important; width: 100%; display: block; zoom: 0.85; padding: 0 !important; box-shadow:none !important;}
-  .bracket { min-height: auto !important; width: 100%; justify-content: stretch; page-break-inside: avoid; }
-  .bracket-round { padding: 0 10px !important; min-width: 180px !important; }
-  .ko-match { background: transparent !important; border: 1px solid #000 !important; box-shadow: none !important; margin: 10px 0 !important;}
-  .ko-team { border-bottom-color: #ccc !important; padding: 6px 10px !important; color: #000 !important;}
-  .ko-team.winner { background-color: #e2e8f0 !important; color: black !important; border-left: 4px solid #000 !important; }
+  .bracket-wrapper { 
+      border: none !important; 
+      overflow: visible !important; /* Allow bracket to expand beyond container for print */
+      width: 100%; 
+      display: block; 
+      padding: 0 !important; 
+  }
+  .bracket { 
+      min-height: auto !important; 
+      width: 100%; 
+      justify-content: stretch; 
+      page-break-inside: avoid; 
+  }
+  .bracket-round { 
+      padding: 0 10px !important; 
+      min-width: 200px !important; 
+  }
+  .round-title {
+      color: #000 !important;
+      font-weight: 900 !important;
+  }
+
+  /* Match boxes inside the Bracket */
+  .ko-match { 
+      background: transparent !important; 
+      border: 2px solid #000 !important; 
+      margin: 10px 0 !important;
+  }
+  .ko-team { 
+      border-bottom: 1px solid #000 !important; 
+      padding: 6px 10px !important; 
+      color: #000 !important;
+      background: transparent !important;
+  }
+  .ko-team:last-child {
+      border-bottom: none !important;
+  }
+  
+  /* Highlight Winner slightly in print */
+  .ko-team.winner, .match-team.winner { 
+      background-color: #e2e8f0 !important; 
+      font-weight: 900 !important;
+      border-left: 4px solid #000 !important; 
+  }
+  
+  /* Make sure Bracket Connector Lines are Solid Black */
   .bracket-round:not(:last-child) .ko-match::after,
   .bracket-round:not(:first-child) .ko-match::before,
   .bracket-round:not(:last-child) .ko-match:nth-child(odd)::after,
-  .bracket-round:not(:last-child) .ko-match:nth-child(even)::after { border-color: #000 !important; border-width: 2px !important; }
+  .bracket-round:not(:last-child) .ko-match:nth-child(even)::after { 
+      border-color: #000 !important; 
+      border-width: 2px !important; 
+  }
+
+  /* Fixtures (Master Schedule) Print Tweaks */
+  .match-selector { 
+      page-break-inside: avoid; 
+      border: 1px solid #000 !important; 
+      margin-bottom: 10px !important; 
+  }
+  .match-selector > div:first-child { 
+      border-bottom: 1px solid #000 !important; 
+  }
+  .match-team { 
+      border-bottom: 1px solid #ccc !important; 
+  }
+  .match-team a, .ko-team a {
+      color: #000 !important;
+      text-decoration: none !important;
+  }
   
-  .groups-grid { display: grid !important; grid-template-columns: repeat(2, 1fr) !important; gap: 15px !important; margin-bottom: 2rem; }
-  .group-card { border: 1px solid #ccc !important; page-break-inside: avoid; margin-bottom: 10px !important; background: transparent !important; box-shadow:none !important;}
-  .group-header { background: #f1f5f9 !important; color: black !important; border-bottom: 1px solid #ccc !important; }
-  .groups-table th { background: #f8fafc !important; color: black !important; }
-  .advancing-row { background: #d1fae5 !important; border-color:#2e7d32 !important; }
-  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  /* Report Specific */
+  .report-container { max-width: 100%; border:none; background:transparent;}
+  .report-table th {background:#f3f4f6 !important;}
+  .report-table td, .report-table th {border-color:#ccc !important;}
+  .bwf-header {border-color:#000;}
+  .bwf-summary-box { border-color: #000 !important; }
 }
 
 @media(max-width:1024px){
@@ -1422,7 +1505,7 @@ window.HistoryHub = {
 
 window.TournamentHub = {
   activeTab: null,
-  setupState: { step: 1, name: '', format: 'groups', numGroups: 4, advanceCount: 2, teamCount: 8, teams: [], settings: { matchType: 'singles', bestOf: 3, pointsToWin: 21, deuceEnabled: true, deuceCap: 30 } },
+  setupState: { step: 1, name: '', format: 'groups', numGroups: 4, advanceCount: 2, teamCount: 8, teams: [], settings: { matchType: 'singles', bestOfGroup: 3, bestOfKO: 3, pointsToWin: 21, deuceEnabled: true, deuceCap: 30 } },
   
   render(container) { 
       if (window.__IS_FETCHING_TOURNEY) {
@@ -1459,7 +1542,14 @@ window.TournamentHub = {
 
         const c = this.setupState.settings;
         body.appendChild(UIUtils.segmentedControl('Match Format', [{label:'Singles', val:'singles'}, {label:'Doubles', val:'doubles'}], c.matchType, v => { c.matchType = v; window.Router.render(); }));
-        body.appendChild(UIUtils.numberRow('Best Of (Games)', c.bestOf, v => c.bestOf = v, 1, 5));
+        
+        if (this.setupState.format === 'groups') {
+            body.appendChild(UIUtils.numberRow('Best Of (Group Stage)', c.bestOfGroup, v => { c.bestOfGroup = v; window.Router.render(); }, 1, 5));
+            body.appendChild(UIUtils.numberRow('Best Of (Knockouts)', c.bestOfKO, v => { c.bestOfKO = v; window.Router.render(); }, 1, 5));
+        } else {
+            body.appendChild(UIUtils.numberRow('Best Of (Games)', c.bestOfKO, v => { c.bestOfKO = v; window.Router.render(); }, 1, 5));
+        }
+        
         body.appendChild(UIUtils.numberRow('Points to Win', c.pointsToWin, v => c.pointsToWin = v, 5, 30));
 
     } else if (this.setupState.step === 2) {
@@ -1588,6 +1678,44 @@ window.TournamentHub = {
       reader.readAsText(file);
   },
 
+  _exportFixturesCSV(t) {
+      let allMatches = [];
+      if (t.groups) t.groups.forEach(g => g.matches.forEach(m => allMatches.push(m)));
+      if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { if (!m.isBye) allMatches.push(m); }));
+      allMatches.sort((a,b) => a.matchNum - b.matchNum);
+
+      let csvContent = "data:text/csv;charset=utf-8,";
+      csvContent += "Match No.,Stage,Team A,Team B,Date & Time,Court,Status,Result\n";
+
+      allMatches.forEach(m => {
+          const teamA = t.teams.find(tm => tm.id === m.teamAId)?.name || m.labelA || 'TBD';
+          const teamB = t.teams.find(tm => tm.id === m.teamBId)?.name || m.labelB || 'TBD';
+          const status = m.status === 'completed' ? 'Completed' : (m.status === 'live' ? 'Live' : 'Scheduled');
+          const result = m.status === 'completed' ? `${m.scoreA} - ${m.scoreB}` : '';
+          
+          const row = [
+              m.matchNum, 
+              `"${m.stage}"`, 
+              `"${teamA}"`, 
+              `"${teamB}"`, 
+              "[          ]", 
+              "[          ]", 
+              status, 
+              result
+          ].join(",");
+          
+          csvContent += row + "\n";
+      });
+
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `${t.name.replace(/\s+/g, '_')}_Fixtures.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+  },
+
   _initTournament() {
       const s = this.setupState; const teams = s.teams.filter(t => t.name.trim() !== '');
       const reqTeams = s.format === 'groups' ? (s.numGroups * s.advanceCount) : 2;
@@ -1696,14 +1824,20 @@ window.TournamentHub = {
       allMatches.sort((a,b) => a.matchNum - b.matchNum);
 
       if (!isSpectator) {
-          const headerActions = el('div', {className: 'flex justify-between items-center mb-md flex-wrap gap-sm'});
-          headerActions.appendChild(el('div', {className: 'text-sm text-secondary font-medium'}, ['Edit teams via dropdowns or upload a custom CSV schedule (Format: MatchNum, Team1, Team2).']));
+          const headerActions = el('div', {className: 'flex justify-between items-center mb-md flex-wrap gap-sm no-print'});
+          headerActions.appendChild(el('div', {className: 'text-sm text-secondary font-medium'}, ['Edit teams via dropdowns or upload a custom CSV schedule.']));
           
           const uploadLabel = el('label', { className: 'btn btn-ghost btn-sm', style: { cursor: 'pointer', margin: 0, fontWeight:'bold' } }, [
               Icons.upload, ' Upload CSV Schedule',
               el('input', { type: 'file', accept: '.csv', style: { display: 'none' }, onChange: (e) => this._handleScheduleCSV(e, t) })
           ]);
-          headerActions.appendChild(uploadLabel);
+
+          const exportGroup = el('div', { className: 'flex gap-sm flex-wrap mt-sm' });
+          exportGroup.appendChild(uploadLabel);
+          exportGroup.appendChild(el('button', { className: 'btn btn-success btn-sm', onClick: () => this._exportFixturesCSV(t) }, ['⬇️ Export Fixtures CSV']));
+          exportGroup.appendChild(el('button', { className: 'btn btn-primary btn-sm', onClick: () => window.print() }, ['🖨️ Print Fixtures (PDF)']));
+
+          headerActions.appendChild(exportGroup);
           wrap.appendChild(headerActions);
       }
 
@@ -1732,7 +1866,7 @@ window.TournamentHub = {
               
               if (!isSpectator && m.status === 'pending') {
                   const sel = el('select', { 
-                      className: 'team-dropdown',
+                      className: 'team-dropdown no-print',
                       onChange: (e) => TournamentManager.updateMatchTeam(m.id, slotKey, e.target.value)
                   });
                   sel.appendChild(el('option', { value: '' }, ['TBD']));
@@ -1741,8 +1875,14 @@ window.TournamentHub = {
                   });
                   div.appendChild(sel);
                   
+                  // ADDED: Print-only text element so team names show up on PDF for pending matches
+                  const fallbackLabel = slotKey === 'teamAId' ? m.labelA : m.labelB;
+                  const printName = teamObj ? escapeHTML(teamObj.name) : (fallbackLabel || 'TBD');
+                  const printLabel = el('span', { className: 'print-only', style: { fontSize: '1rem', fontWeight: '700' } }, [printName]);
+                  div.appendChild(printLabel);
+                  
                   if (teamId) {
-                      const winBtn = el('button', { className: 'btn btn-ghost btn-sm', style: {padding: '4px 10px', fontSize: '0.75rem', color: 'var(--accent-success)', fontWeight:'bold'}, onClick: () => TournamentManager.simulateWin(m.id, teamId) }, ['Win']);
+                      const winBtn = el('button', { className: 'btn btn-ghost btn-sm no-print', style: {padding: '4px 10px', fontSize: '0.75rem', color: 'var(--accent-success)', fontWeight:'bold'}, onClick: () => TournamentManager.simulateWin(m.id, teamId) }, ['Win']);
                       div.appendChild(winBtn);
                   }
               } else {
@@ -1763,7 +1903,7 @@ window.TournamentHub = {
           teamWrap.appendChild(makeTeamRow(m.teamBId, 'teamBId'));
           mSel.appendChild(teamWrap);
           
-          const actionsRow = el('div', { style: { padding: '12px 16px', textAlign: 'center', background: 'rgba(0,0,0,0.3)', marginTop: 'auto', borderTop:'1px solid var(--border-color)' } });
+          const actionsRow = el('div', { className: 'no-print', style: { padding: '12px 16px', textAlign: 'center', background: 'rgba(0,0,0,0.3)', marginTop: 'auto', borderTop:'1px solid var(--border-color)' } });
 
           if (isSpectator) {
               if (m.status === 'completed') {
@@ -1801,7 +1941,7 @@ window.TournamentHub = {
       TournamentManager._updateStandings();
       const wrap = el('div', { className: 'w-full' });
       
-      const actions = el('div', { className: 'flex justify-end mb-md' });
+      const actions = el('div', { className: 'flex justify-end mb-md no-print' });
       if (!isSpectator && t.phase === 'rr') {
           actions.appendChild(el('button', { className: 'btn btn-success', onClick: () => {
               let incomplete = 0; t.groups.forEach(g => g.matches.forEach(m => { if (!m.winnerId) incomplete++; }));
@@ -1855,7 +1995,7 @@ window.TournamentHub = {
                   div.innerHTML = `<span style="font-size:1rem;">${nameSpan}</span>`;
                   if (isWin) div.appendChild(el('span', {style:{fontSize:'1.2rem'}}, ['🏆']));
                   else if (!isSpectator && m.status === 'pending' && teamObj) {
-                      const winBtn = el('button', { className: 'btn btn-ghost btn-sm', style: {padding: '4px 10px', fontSize: '0.75rem', color: 'var(--accent-success)', fontWeight:'bold'}, onClick: () => TournamentManager.simulateWin(m.id, teamObj.id) }, ['Win']);
+                      const winBtn = el('button', { className: 'btn btn-ghost btn-sm no-print', style: {padding: '4px 10px', fontSize: '0.75rem', color: 'var(--accent-success)', fontWeight:'bold'}, onClick: () => TournamentManager.simulateWin(m.id, teamObj.id) }, ['Win']);
                       div.appendChild(winBtn);
                   }
                   return div;
@@ -1881,17 +2021,22 @@ window.TournamentHub = {
       const isInitialRound = (rIndex) => rIndex === 0;
       const canDrag = !isSpectator && t.phase === 'ko' && rounds[0].every(m => m.status === 'pending' || m.isBye);
 
+      // ADDED PRINT BRACKET BUTTON AT THE TOP OF THE TAB
+      const headerActions = el('div', {className: 'flex justify-end mb-md no-print'});
+      headerActions.appendChild(el('button', { className: 'btn btn-primary btn-sm', onClick: () => window.print() }, ['🖨️ Print Bracket (PDF)']));
+      wrap.appendChild(headerActions);
+
       const getTeamDisplay = (team, label, isBye) => {
           if (isBye && !team) return `<span style="color:var(--text-muted); font-style:italic;">BYE</span>`;
           const labelHtml = label ? `<div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; line-height:1.2; margin-bottom:4px; font-weight:700;">${label}</div>` : '';
-          if (team) { return `<div style="display:flex; flex-direction:column; justify-content:center;">${labelHtml}<a style="font-weight: 700; color:var(--text-primary); font-size:1rem;" onclick="window.showTeamStats('${team.id}')">${escapeHTML(team.name)}</a></div>`; } 
+          if (team) { return `<div style="display:flex; flex-direction:column; justify-content:center;">${labelHtml}<a style="font-weight: 700; color:var(--text-primary); font-size:1rem;">${escapeHTML(team.name)}</a></div>`; } 
           else { return `<div style="display:flex; flex-direction:column; justify-content:center;"><div style="color:var(--text-muted); font-style:italic; font-size: 0.9rem; font-weight:700;">${label || 'TBD'}</div></div>`; }
       };
 
       const scrollWrap = el('div', { className: 'bracket-wrapper' });
       
       if (canDrag) {
-          const helper = el('div', {style:{background:'rgba(255,202,40,0.1)', color:'var(--accent-warning)', padding:'12px', borderRadius:'8px', marginBottom:'16px', border:'1px solid var(--accent-warning)', fontSize:'0.85rem', textAlign:'center'}});
+          const helper = el('div', {className: 'no-print', style:{background:'rgba(255,202,40,0.1)', color:'var(--accent-warning)', padding:'12px', borderRadius:'8px', marginBottom:'16px', border:'1px solid var(--accent-warning)', fontSize:'0.85rem', textAlign:'center'}});
           helper.innerHTML = `<strong>Admin Mode:</strong> The bracket is unlocked. You can drag and drop teams in Round 1 to manually swap their seeds before matches start.`;
           scrollWrap.appendChild(helper);
       }
@@ -2024,7 +2169,7 @@ window.TournamentHub = {
           const receivingSide = servingSide === 'A' ? 'B' : 'A';
 
           const state = {
-              id: match.id, sport: 'badminton', matchType: c.matchType, bestOf: c.bestOf,
+              id: match.id, sport: 'badminton', matchType: c.matchType, bestOf: match.type === 'group' ? (c.bestOfGroup || 3) : (c.bestOfKO || 3),
               settings: { pointsToWin: c.pointsToWin, deuceEnabled: c.deuceEnabled, deuceCap: c.deuceCap },
               sides: { 
                   A: { id: match.teamA.id, name: match.teamA.name, shortCode: autoShortCode(match.teamA.name), color: '#1a73e8', players: cloneState(match.teamA.players) }, 
