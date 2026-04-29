@@ -136,7 +136,7 @@ select.team-dropdown:disabled { opacity: 0.7; cursor: not-allowed; border-color:
 /* ═══════════════════════════════════════════════ */
 .wizard{max-width:900px;margin:0 auto;padding:40px 20px}
 .wizard-body{min-height:400px; animation:fadeIn 0.3s ease;}
-.wizard-actions{display:flex;justify-content:space-between;margin-top:40px;gap:16px; padding-top:24px; border-top:1px solid var(--border-color);}
+.wizard-actions{display:flex;margin-top:40px;gap:16px; padding-top:24px; border-top:1px solid var(--border-color);}
 
 /* ═══════════════════════════════════════════════ */
 /* HOME SCREEN                                     */
@@ -313,7 +313,6 @@ select.team-dropdown:disabled { opacity: 0.7; cursor: not-allowed; border-color:
   }
 
   /* Hide UI Elements during print */
-  /* Hide UI Elements during print */
   .btn, .control-bar, .tourney-tabs, #toast-container, .no-print, .match-list, select, .wizard-actions { 
       display: none !important; 
   }
@@ -321,8 +320,6 @@ select.team-dropdown:disabled { opacity: 0.7; cursor: not-allowed; border-color:
       display: inline-block !important; 
       color: #000000 !important;
   } 
-      display: none !important; 
-  }
 
   /* Bracket Specifics for Flow and Printability */
   @page { size: landscape; margin: 10mm; }
@@ -898,8 +895,8 @@ Object.assign(AppState, {
     this.current = newState; this.save();
   },
   update(fn, actionDesc = 'Update') { const next = cloneState(this.current); fn(next); next.timestamp = Date.now(); this.push(next, actionDesc); },
-  undo() { if (this.history.length > 0) { const last = this.history.pop(); this.current = last.state; this.save(); Toast.show(`Undid: ${last.desc}`); return true; } return false; },
-  clear() { this.current = null; this.history = []; this.activeMatchId = null; localStorage.removeItem(LS_STATE_KEY); }
+  clear() { this.current = null; this.history = []; this.activeMatchId = null; localStorage.removeItem(LS_STATE_KEY); },
+  undo() { if (this.history.length > 0) { const last = this.history.pop(); this.current = last.state; this.save(); Toast.show(`Undid: ${last.desc}`); return true; } return false; }
 });
 
 Object.assign(TournamentManager, {
@@ -1174,6 +1171,53 @@ Object.assign(TournamentManager, {
       window.Router.render();
   },
 
+  // ─── NEW: Clear Match Result ───
+  clearMatchResult(matchId) {
+      if(!this.current) return;
+      const match = this._findMatch(matchId);
+      if(match) {
+          match.status = 'pending';
+          match.winnerId = null;
+          match.scoreA = 0;
+          match.scoreB = 0;
+          match.fullState = null;
+          
+          this._updateStandings();
+          if(this.current.phase === 'ko') this._retreatBracket(match);
+          
+          if (window.FBM.user) {
+              const flatMatch = { ...match }; delete flatMatch.teamA; delete flatMatch.teamB;
+              window.FBM.saveMatchMeta(flatMatch);
+          } else {
+              this.save();
+          }
+          window.Router.render();
+      }
+  },
+
+  _retreatBracket(completedMatch) {
+      const rounds = this.current.koMatches; let rIdx = -1; let mIdx = -1;
+      for(let i=0; i<rounds.length; i++) { mIdx = rounds[i].findIndex(m => m.id === completedMatch.id); if(mIdx !== -1) { rIdx = i; break; } }
+      
+      if(rIdx !== -1 && rIdx < rounds.length - 1) {
+          const nextRoundIdx = rIdx + 1; const nextMatchIdx = Math.floor(mIdx / 2); const isTeamA = mIdx % 2 === 0;
+          let nextMatch = rounds[nextRoundIdx][nextMatchIdx]; 
+          
+          if(isTeamA) nextMatch.teamAId = null; else nextMatch.teamBId = null;
+          nextMatch.winnerId = null;
+          nextMatch.status = 'pending';
+          nextMatch.scoreA = 0;
+          nextMatch.scoreB = 0;
+          
+          this._retreatBracket(nextMatch);
+          
+          if (window.FBM.user) {
+              const flatNextMatch = { ...nextMatch }; delete flatNextMatch.teamA; delete flatNextMatch.teamB;
+              window.FBM.saveMatchMeta(flatNextMatch);
+          }
+      }
+  },
+
   updateMatchTeam(matchId, slotKey, newTeamId) {
       if(!this.current) return;
       const match = this._findMatch(matchId);
@@ -1290,7 +1334,6 @@ window.Router = {
 
         if (window.FBM.user) {
             
-            // Wait for data load before rendering print view
             if (this.currentView === 'tournament_print') {
                 const tId = historyTourneyId || activeTourneyId;
                 if (tId) {
@@ -1337,7 +1380,6 @@ window.Router = {
             }
 
         } else {
-            // Local Offline Mode fallback
             TournamentManager.loadLocalFallback(); AppState.load();
             if (this.currentView === 'board') {
                  setInterval(() => {
@@ -1596,7 +1638,7 @@ window.TournamentHub = {
     const actions = el('div', { className: 'wizard-actions' });
     if(this.setupState.step === 1) {
         actions.appendChild(el('button', { className: 'btn btn-ghost', onClick: () => window.Router.navigate('home') }, ['← Home']));
-        actions.appendChild(el('button', { className: 'btn btn-primary', onClick: () => { this.setupState.step = 2; window.Router.render(); } }, ['Next: Rosters →']));
+        actions.appendChild(el('button', { className: 'btn btn-primary', style: { marginLeft: 'auto' }, onClick: () => { this.setupState.step = 2; window.Router.render(); } }, ['Next: Rosters →']));
     } else {
         actions.appendChild(el('button', { className: 'btn btn-ghost', onClick: () => { this.setupState.step = 1; window.Router.render(); } }, ['← Back']));
         
@@ -1604,7 +1646,7 @@ window.TournamentHub = {
         if (this.setupState.format === 'groups') reqTeams = this.setupState.numGroups * this.setupState.advanceCount;
         if (this.setupState.teams.length < reqTeams) isValid = false;
 
-        const genBtn = el('button', { className: 'btn btn-success btn-lg', onClick: () => this._initTournament() }, [Icons.trophy, isValid ? ' Generate Bracket' : ` Need ${reqTeams - this.setupState.teams.length} more teams`]);
+        const genBtn = el('button', { className: 'btn btn-success btn-lg', style: { marginLeft: 'auto' }, onClick: () => this._initTournament() }, [Icons.trophy, isValid ? ' Generate Bracket' : ` Need ${reqTeams - this.setupState.teams.length} more teams`]);
         if (!isValid) genBtn.setAttribute('disabled', '');
         actions.appendChild(genBtn);
     }
@@ -1915,7 +1957,11 @@ window.TournamentHub = {
               }
           } else {
               if (m.status === 'completed') {
+                  actionsRow.style.display = 'flex';
+                  actionsRow.style.justifyContent = 'space-between';
+                  actionsRow.style.alignItems = 'center';
                   actionsRow.appendChild(el('span', {className:'text-xs', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['MATCH COMPLETED ✓']));
+                  actionsRow.appendChild(el('button', { className: 'btn btn-ghost btn-sm no-print', onClick: () => TournamentManager.clearMatchResult(m.id) }, ['↩️ Undo/Clear']));
               } else if (m.status === 'live') {
                   actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm w-full', style: {fontSize: '0.85rem', padding: '8px 12px', fontWeight:'bold'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 RESUME LIVE']));
               } else {
@@ -1993,8 +2039,13 @@ window.TournamentHub = {
                   }
                   
                   div.innerHTML = `<span style="font-size:1rem;">${nameSpan}</span>`;
-                  if (isWin) div.appendChild(el('span', {style:{fontSize:'1.2rem'}}, ['🏆']));
-                  else if (!isSpectator && m.status === 'pending' && teamObj) {
+                  if (isWin) {
+                      div.appendChild(el('span', {style:{fontSize:'1.2rem'}}, ['🏆']));
+                      if (!isSpectator) {
+                          const undoBtn = el('button', { className: 'btn btn-ghost btn-sm no-print', style: {padding: '4px 10px', fontSize: '0.75rem', marginLeft: '10px'}, onClick: (e) => { e.stopPropagation(); TournamentManager.clearMatchResult(m.id); } }, ['↩️ Undo']);
+                          div.appendChild(undoBtn);
+                      }
+                  } else if (!isSpectator && m.status === 'pending' && teamObj) {
                       const winBtn = el('button', { className: 'btn btn-ghost btn-sm no-print', style: {padding: '4px 10px', fontSize: '0.75rem', color: 'var(--accent-success)', fontWeight:'bold'}, onClick: () => TournamentManager.simulateWin(m.id, teamObj.id) }, ['Win']);
                       div.appendChild(winBtn);
                   }
@@ -2097,7 +2148,13 @@ window.TournamentHub = {
                       else if (m.status === 'live') actionsRow.appendChild(el('button', { className: 'btn btn-primary btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto'}, onClick: () => DisplayManager.launchScoreboard(m.id) }, ['📺 View Live Match']));
                       else actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['UPCOMING']));
                   } else {
-                      if (m.status === 'completed') actionsRow.appendChild(el('span', {className:'text-xs text-success', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['COMPLETED ✓']));
+                      if (m.status === 'completed') {
+                          actionsRow.style.display = 'flex';
+                          actionsRow.style.justifyContent = 'space-between';
+                          actionsRow.style.alignItems = 'center';
+                          actionsRow.appendChild(el('span', {className:'text-xs text-success', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['COMPLETED ✓']));
+                          actionsRow.appendChild(el('button', { className: 'btn btn-ghost btn-sm no-print', style: {padding: '4px 8px'}, onClick: () => TournamentManager.clearMatchResult(m.id) }, ['↩️ Undo']));
+                      }
                       else if (!m.teamA || !m.teamB) actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['PENDING TEAMS']));
                       else if (m.status === 'live') actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto', fontWeight:'bold'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 Resume Live Match']));
                       else actionsRow.appendChild(el('button', { className: 'btn btn-ghost btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto'}, onClick: () => this._playTournamentMatch(m.id) }, ['▶ Start Match']));
