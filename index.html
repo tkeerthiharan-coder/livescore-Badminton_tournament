@@ -1277,6 +1277,76 @@ Object.assign(TournamentManager, {
       }
   },
 
+  swapTeamsGlobally(team1Id, team2Id) {
+      if(!this.current || team1Id === team2Id) return;
+      const t = this.current;
+
+      const t1 = t.teams.find(x => x.id === team1Id);
+      const t2 = t.teams.find(x => x.id === team2Id);
+      if (!t1 || !t2) return;
+
+      const tempGroup = t1.groupId;
+      t1.groupId = t2.groupId;
+      t2.groupId = tempGroup;
+
+      if (t.groups) {
+          let g1 = null, g2 = null, idx1 = -1, idx2 = -1;
+          t.groups.forEach(g => {
+              const i1 = g.teams.findIndex(x => x.id === team1Id);
+              if (i1 !== -1) { g1 = g; idx1 = i1; }
+              const i2 = g.teams.findIndex(x => x.id === team2Id);
+              if (i2 !== -1) { g2 = g; idx2 = i2; }
+          });
+
+          if (g1 && g2) {
+              const tempTm = g1.teams[idx1];
+              g1.teams[idx1] = g2.teams[idx2];
+              g2.teams[idx2] = tempTm;
+          }
+
+          t.groups.forEach(g => {
+              g.matches.forEach(m => {
+                  if (m.teamAId === team1Id) { m.teamAId = team2Id; m.teamA = t2; }
+                  else if (m.teamAId === team2Id) { m.teamAId = team1Id; m.teamA = t1; }
+
+                  if (m.teamBId === team1Id) { m.teamBId = team2Id; m.teamB = t2; }
+                  else if (m.teamBId === team2Id) { m.teamBId = team1Id; m.teamB = t1; }
+
+                  if (m.winnerId === team1Id) m.winnerId = team2Id;
+                  else if (m.winnerId === team2Id) m.winnerId = team1Id;
+              });
+          });
+      }
+
+      if (t.koMatches) {
+          t.koMatches.forEach(r => r.forEach(m => {
+              if (m.teamAId === team1Id) { m.teamAId = team2Id; m.teamA = t2; }
+              else if (m.teamAId === team2Id) { m.teamAId = team1Id; m.teamA = t1; }
+
+              if (m.teamBId === team1Id) { m.teamBId = team2Id; m.teamB = t2; }
+              else if (m.teamBId === team2Id) { m.teamBId = team1Id; m.teamB = t1; }
+
+              if (m.winnerId === team1Id) m.winnerId = team2Id;
+              else if (m.winnerId === team2Id) m.winnerId = team1Id;
+          }));
+      }
+
+      this._updateStandingsInMemory(t);
+
+      if (window.FBM.user) {
+          const meta = { id: t.id, name: t.name, format: t.format, phase: t.phase, numGroups: t.numGroups, advanceCount: t.advanceCount, settings: t.settings, status: t.status, createdAt: t.createdAt || Date.now() };
+          const flatMatches = [];
+          if (t.groups) t.groups.forEach(g => g.matches.forEach(m => { const mf = {...m}; delete mf.teamA; delete mf.teamB; flatMatches.push(mf); }));
+          if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { const mf = {...m}; delete mf.teamA; delete mf.teamB; flatMatches.push(mf); }));
+          
+          window.FBM.updateTournamentPhase(meta, t.teams, flatMatches);
+      } else {
+          this.save();
+      }
+      Toast.show(`Swapped ${t1.name} and ${t2.name}`);
+      window.Router.render();
+  },
+
   transitionToKnockout() {
       if(!this.current || this.current.phase !== 'rr' || !this.current.groups) return;
       this._updateStandings();
@@ -2012,9 +2082,36 @@ window.TournamentHub = {
           g.teams.forEach((tm, i) => {
               const tr = el('tr', { className: i < t.advanceCount ? 'advancing-row' : '' });
               tr.appendChild(el('td', {style:{fontWeight:'bold'}}, [String(i + 1)]));
-              tr.appendChild(el('td', { style: {fontWeight: '700'} }, [
-                  el('a', {onClick: () => window.showTeamStats(tm.id)}, [escapeHTML(tm.name)])
-              ]));
+              
+              const teamTd = el('td', { style: {fontWeight: '700'} });
+              if (!isSpectator && t.phase === 'rr') {
+                  const selWrap = el('div', { className: 'flex items-center gap-xs' });
+                  const sel = el('select', { 
+                      className: 'team-dropdown no-print',
+                      style: { width: '100%', minWidth: '120px', maxWidth: '100%', padding: '4px 8px', fontSize: '0.9rem', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid var(--border-color)', borderRadius: '4px' },
+                      onChange: (e) => {
+                          const newTeamId = e.target.value;
+                          if (newTeamId && newTeamId !== tm.id) {
+                              CustomAlert.show(`Swap ${tm.name} with this team? All their group matches will be swapped.`, 'confirm', () => {
+                                  TournamentManager.swapTeamsGlobally(tm.id, newTeamId);
+                              });
+                              e.target.value = tm.id; // Reset back immediately; will be updated if confirmed
+                          }
+                      }
+                  });
+                  t.teams.forEach(allTm => {
+                      sel.appendChild(el('option', { value: allTm.id, ...(allTm.id === tm.id ? {selected:''} : {}) }, [escapeHTML(allTm.name)]));
+                  });
+                  selWrap.appendChild(sel);
+                  teamTd.appendChild(selWrap);
+                  
+                  // Print only span
+                  teamTd.appendChild(el('span', { className: 'print-only' }, [escapeHTML(tm.name)]));
+              } else {
+                  teamTd.appendChild(el('a', {onClick: () => window.showTeamStats(tm.id)}, [escapeHTML(tm.name)]));
+              }
+              tr.appendChild(teamTd);
+
               tr.appendChild(el('td', { className: 'text-muted font-bold' }, [String(tm.played)]));
               tr.appendChild(el('td', { style: {fontWeight: '900', color: 'var(--accent-primary)', fontSize:'1.1rem'} }, [String(tm.wins)]));
               tbody.appendChild(tr);
