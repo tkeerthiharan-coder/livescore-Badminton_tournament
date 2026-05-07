@@ -403,11 +403,106 @@ select.team-dropdown:disabled { opacity: 0.7; cursor: not-allowed; border-color:
   .bwf-summary-box { border-color: #000 !important; }
 }
 
+
+/* ═══════════════════════════════════════════════ */
+/* RESPONSIVE — MOBILE / TABLET / LAPTOP           */
+/* ═══════════════════════════════════════════════ */
+
+/* ── Control panel: tablets & small laptops ──── */
 @media(max-width:1024px){
   .control-layout{grid-template-columns:1fr;grid-template-rows:auto 1fr auto auto}
   .control-sidebar{border-right:none;border-bottom:1px solid var(--border-color);max-height:300px;}
   .control-sidebar.right{border-left:none;border-top:1px solid var(--border-color);max-height:300px}
 }
+
+/* ── Tournament hub: tablet ───────────────────── */
+@media(max-width:900px){
+  .tournament-hub{padding:16px;}
+  .tourney-tabs{gap:4px; padding-bottom:8px; margin-bottom:16px;}
+  .tourney-tab{padding:7px 11px; font-size:0.82rem;}
+  .groups-grid{grid-template-columns:1fr;}
+  .bracket-round{min-width:200px; padding:0 0.8rem;}
+  .sport-cards{gap:16px; margin-top:32px;}
+  .sport-card{padding:28px 20px; min-width:200px;}
+  .sport-card-emoji{font-size:2.8rem; margin-bottom:12px;}
+  .sport-card-title{font-size:1.4rem;}
+}
+
+/* ── Mobile (<600 px) ─────────────────────────── */
+@media(max-width:600px){
+  /* Layout */
+  .tournament-hub{padding:10px;}
+  .card{padding:16px; border-radius:var(--radius-md);}
+  .wizard{padding:16px 10px;}
+
+  /* Home screen */
+  .home-screen{padding:16px;}
+  .home-logo{font-size:clamp(2.2rem,12vw,3.5rem);}
+  .home-tagline{font-size:0.9rem;}
+  .sport-cards{flex-direction:column; gap:12px; margin-top:24px;}
+  .sport-card{padding:20px 16px; min-width:unset; border-radius:var(--radius-lg);}
+  .sport-card-emoji{font-size:2.2rem; margin-bottom:8px;}
+  .sport-card-title{font-size:1.2rem;}
+  .sport-card-desc{font-size:0.82rem;}
+
+  /* Tabs — scrollable pill row */
+  .tourney-tabs{flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; gap:6px; padding-bottom:10px;}
+  .tourney-tabs::-webkit-scrollbar{display:none;}
+  .tourney-tab{padding:6px 10px; font-size:0.78rem; flex-shrink:0;}
+
+  /* Groups grid → single column */
+  .groups-grid{grid-template-columns:1fr; gap:12px;}
+  .match-list{max-height:280px;}
+
+  /* Schedule grid → single column */
+  #schedule-grid{grid-template-columns:1fr!important;}
+
+  /* Buttons */
+  .btn{padding:10px 16px; font-size:0.85rem;}
+  .btn-sm{padding:7px 12px; font-size:0.78rem;}
+  .btn-xl{padding:14px 24px; font-size:1rem;}
+
+  /* Teams tab outer grid → 1 col */
+  #teams-outer-grid{grid-template-columns:1fr!important;}
+
+  /* Player stats table — hide less-important cols on mobile */
+  .ps-col-lost,.ps-col-grp{display:none;}
+
+  /* Action bars stack vertically */
+  .teams-action-bar{flex-direction:column; align-items:stretch!important;}
+  .teams-action-bar input{width:100%!important;}
+
+  /* Stats top bar stacks */
+  .stats-top-bar{flex-direction:column; gap:8px;}
+  .stats-chips-row{flex-wrap:wrap;}
+
+  /* Modal */
+  .modal{padding:20px; border-radius:var(--radius-lg);}
+  .modal-title{font-size:1.2rem;}
+
+  /* Control panel: sidebar collapses */
+  .control-layout{grid-template-columns:1fr;grid-template-rows:auto 1fr auto auto}
+  .control-sidebar{border-right:none;border-bottom:1px solid var(--border-color);max-height:220px;}
+  .control-sidebar.right{border-left:none;border-top:1px solid var(--border-color);max-height:220px;}
+  .control-main{padding:12px;}
+  .control-bar{padding:10px 12px; gap:8px;}
+  .point-btn{min-height:100px;}
+
+  /* Home join section */
+  .join-btn-row{flex-direction:column!important;}
+  .join-btn-row .btn{width:100%;}
+
+  /* Settings */
+  .setting-row{flex-direction:column; align-items:flex-start!important; gap:10px;}
+}
+
+/* ── Very small phones (360 px) ───────────────── */
+@media(max-width:380px){
+  .home-logo{font-size:2rem;}
+  .btn{min-height:40px;}
+  .tourney-tab{padding:5px 8px; font-size:0.72rem;}
+}
+
 </style>
 </head>
 <body>
@@ -496,6 +591,14 @@ window.FBM = {
     async saveMatchMeta(match) {
         if(!this.user || !match || !match.id) return;
         try { await setDoc(doc(this.db, ...this.basePath, 'matches', match.id), match); } catch(e){}
+    },
+
+    async saveTeam(team) {
+        if(!this.user || !team || !team.id) return;
+        // Persist only plain data — strip hydrated references
+        const plain = {...team};
+        delete plain.teamA; delete plain.teamB;
+        try { await setDoc(doc(this.db, ...this.basePath, 'teams', plain.id), plain); } catch(e){ console.warn('saveTeam error', e); }
     },
 
     async saveMatchDetail(matchId, state) {
@@ -1500,44 +1603,120 @@ window.Renderer = {
     home.appendChild(el('div', { className: 'home-logo' }, ['LiveScore Pro']));
     home.appendChild(el('div', { className: 'home-tagline' }, ['Ultimate Bracket Edition']));
     
-    const joinSection = el('div', { className: 'card flex flex-col items-center mt-lg mb-md', style: {maxWidth: '600px', width: '100%'} });
-    joinSection.appendChild(el('div', { className: 'text-lg', style: {fontWeight: '800', marginBottom: '8px', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '1px'} }, ['Join Tournament']));
-    joinSection.appendChild(el('div', { className: 'text-sm text-secondary mb-md text-center', style:{fontWeight: '500'} }, ['Enter the Tournament ID provided by the organizer to officiate or watch live matches.']));
+    const joinSection = el('div', { className: 'card flex flex-col items-center mt-lg mb-md', style: {maxWidth: '620px', width: '100%'} });
+    joinSection.appendChild(el('div', { className: 'text-lg', style: {fontWeight: '800', marginBottom: '8px', color: 'var(--accent-primary)', textTransform: 'uppercase', letterSpacing: '1px'} }, ['🔗 Join Tournament']));
+    joinSection.appendChild(el('div', { className: 'text-sm text-secondary mb-md text-center', style:{fontWeight: '500'} }, ['Enter the Tournament ID to join. Umpires use their Umpire ID for restricted access. Masters enter the PIN for full control.']));
     
-    const joinRow = el('div', { className: 'flex gap-sm w-full flex-wrap justify-center', style: {maxWidth: '500px'} });
-    const joinInput = el('input', { type: 'text', placeholder: 'Enter ID (e.g. A1B2C3)', style: {flex: '1 1 100%', textTransform: 'uppercase', textAlign: 'center', fontSize: '1.2rem', letterSpacing: '2px', fontWeight: 'bold', marginBottom:'8px'} });
+    const joinRow = el('div', { className: 'join-btn-row flex gap-sm w-full flex-wrap justify-center', style: {maxWidth: '540px'} });
+    const joinInput = el('input', { type: 'text', placeholder: 'Tournament ID (e.g. A1B2C3)', style: {flex: '1 1 100%', textTransform: 'uppercase', textAlign: 'center', fontSize: '1.1rem', letterSpacing: '2px', fontWeight: 'bold', marginBottom:'8px'} });
     
-    const joinUmpireBtn = el('button', { className: 'btn btn-primary flex-1', onClick: () => {
+    // Master Console button — prompts PIN if set
+    const joinMasterBtn = el('button', { className: 'btn btn-warning flex-1', style:{minWidth:'130px'}, onClick: () => {
         const id = joinInput.value.trim().toUpperCase();
-        if(id) {
+        if (!id) { Toast.show('Please enter a Tournament ID', 2000); return; }
+        const masterPin = localStorage.getItem('MASTER_PIN') || '';
+        const proceed = () => {
             localStorage.setItem('ACTIVE_TOURNEY_ID', id);
-            localStorage.setItem('USER_ROLE', 'umpire');
+            localStorage.setItem('USER_ROLE', 'umpire'); // master uses umpire role (not spectator)
+            localStorage.removeItem('UMPIRE_SESSION_ID');
             window.Router.navigate('tournament');
-            window.location.reload(); 
-        } else { Toast.show('Please enter a valid Tournament ID', 2000); }
-    }}, ['Admin / Umpire']);
+            window.location.reload();
+        };
+        if (masterPin) {
+            // Show PIN modal
+            const overlay = el('div', { className: 'modal-overlay' });
+            const modal = el('div', { className: 'modal', style:{maxWidth:'360px'} });
+            modal.appendChild(el('div', {className:'modal-title'}, ['🔐 Master Console PIN']));
+            modal.appendChild(el('div', {className:'text-sm text-secondary mb-md'}, ['Enter your master PIN to get full control access.']));
+            const pinInp = el('input', {type:'password', placeholder:'PIN', style:{marginBottom:'16px', textAlign:'center', fontSize:'1.5rem', letterSpacing:'8px'}});
+            modal.appendChild(pinInp);
+            const btnRow = el('div', {className:'flex gap-sm'});
+            btnRow.appendChild(el('button', {className:'btn btn-ghost flex-1', onClick:()=> overlay.remove()}, ['Cancel']));
+            btnRow.appendChild(el('button', {className:'btn btn-warning flex-1', onClick:()=>{
+                if (pinInp.value === masterPin) { overlay.remove(); proceed(); }
+                else { Toast.show('Wrong PIN!', 2000); pinInp.value=''; pinInp.focus(); }
+            }}, ['Enter']));
+            pinInp.addEventListener('keydown', e => { if(e.key==='Enter') btnRow.lastChild.click(); });
+            modal.appendChild(btnRow);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+            setTimeout(()=>pinInp.focus(), 100);
+        } else { proceed(); }
+    }}, ['🔑 Master Console']);
 
-    const joinFanBtn = el('button', { className: 'btn btn-success flex-1', onClick: () => {
+    // Umpire button — validates against registered umpires
+    const joinUmpireBtn = el('button', { className: 'btn btn-primary flex-1', style:{minWidth:'130px'}, onClick: () => {
+        const id = joinInput.value.trim().toUpperCase();
+        if (!id) { Toast.show('Please enter a Tournament ID', 2000); return; }
+        
+        // Show umpire ID prompt
+        const overlay = el('div', { className: 'modal-overlay' });
+        const modal = el('div', { className: 'modal', style:{maxWidth:'380px'} });
+        modal.appendChild(el('div', {className:'modal-title'}, ['🎙️ Umpire Login']));
+        modal.appendChild(el('div', {className:'text-sm text-secondary mb-md'}, ['Enter your Umpire ID to access your restricted console. Contact the organizer for your ID.']));
+        const umpInp = el('input', {type:'text', placeholder:'Umpire ID (e.g. UMP-01)', style:{marginBottom:'16px', textTransform:'uppercase', textAlign:'center', fontSize:'1.1rem', letterSpacing:'4px', fontWeight:'bold'}});
+        modal.appendChild(umpInp);
+        const btnRow = el('div', {className:'flex gap-sm'});
+        btnRow.appendChild(el('button', {className:'btn btn-ghost flex-1', onClick:()=> overlay.remove()}, ['Cancel']));
+        btnRow.appendChild(el('button', {className:'btn btn-primary flex-1', onClick:()=>{
+            const umpId = umpInp.value.trim().toUpperCase();
+            const umpires = JSON.parse(localStorage.getItem('REGISTERED_UMPIRES') || '[]');
+            const ump = umpires.find(u => u.id === umpId);
+            if (!ump) { Toast.show('Umpire ID not found. Contact organizer.', 3000); return; }
+            overlay.remove();
+            localStorage.setItem('ACTIVE_TOURNEY_ID', id);
+            localStorage.setItem('USER_ROLE', 'spectator'); // umpires get spectator role (restricted by perms)
+            localStorage.setItem('UMPIRE_SESSION_ID', ump.id);
+            localStorage.setItem('UMPIRE_SESSION_NAME', ump.name);
+            window.Router.navigate('tournament');
+            window.location.reload();
+        }}, ['Login']));
+        umpInp.addEventListener('keydown', e => { if(e.key==='Enter') btnRow.lastChild.click(); });
+        modal.appendChild(btnRow);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        setTimeout(()=>umpInp.focus(), 100);
+    }}, ['🎙️ Umpire Login']);
+
+    const joinFanBtn = el('button', { className: 'btn btn-success flex-1', style:{minWidth:'130px'}, onClick: () => {
         const id = joinInput.value.trim().toUpperCase();
         if(id) {
             localStorage.setItem('ACTIVE_TOURNEY_ID', id);
             localStorage.setItem('USER_ROLE', 'spectator');
+            localStorage.removeItem('UMPIRE_SESSION_ID');
             window.Router.navigate('tournament');
             window.location.reload(); 
         } else { Toast.show('Please enter a valid Tournament ID', 2000); }
-    }}, ['Spectate (Fan)']);
+    }}, ['👁️ Spectate (Fan)']);
 
     joinRow.appendChild(joinInput); 
+    joinRow.appendChild(joinMasterBtn);
     joinRow.appendChild(joinUmpireBtn);
     joinRow.appendChild(joinFanBtn);
     joinSection.appendChild(joinRow);
+    
+    // Show current session info
+    const umpSessId = localStorage.getItem('UMPIRE_SESSION_ID');
+    const umpSessName = localStorage.getItem('UMPIRE_SESSION_NAME');
+    if (umpSessId) {
+        const sessInfo = el('div', {className:'text-xs text-muted mt-sm text-center'});
+        sessInfo.innerHTML = `Logged in as Umpire: <strong style="color:var(--accent-primary)">${umpSessName} (${umpSessId})</strong> — <a onclick="localStorage.removeItem('UMPIRE_SESSION_ID');localStorage.removeItem('UMPIRE_SESSION_NAME');window.Router.render();" style="color:var(--accent-danger);cursor:pointer;">Logout</a>`;
+        joinSection.appendChild(sessInfo);
+    }
     home.appendChild(joinSection);
 
     const cards = el('div', { className: 'sport-cards', style: {marginTop: '24px'} });
+    cards.appendChild(el('div', { className: 'sport-card', style:{borderColor:'rgba(255,167,38,0.4)', background:'rgba(255,167,38,0.05)'}, onClick: () => {
+        CustomAlert.show('Load GGS Badminton Tournament 2026? (32 teams, 8 groups A–H, 48 fixtures with court & time)', 'confirm', () => window.loadGGSTournament());
+    }}, [
+        el('span', { className: 'sport-card-emoji' }, ['🏸']),
+        el('div', { className: 'sport-card-title', style:{color:'var(--accent-badminton)'} }, ['GGS Tournament 2026']),
+        el('div', { className: 'sport-card-desc' }, ['Load pre-built GGS Badminton Tournament — 32 teams, 8 groups, 48 fixtures'])
+    ]));
     cards.appendChild(el('div', { className: 'sport-card', onClick: () => { TournamentManager.clear(); localStorage.setItem('USER_ROLE', 'umpire'); window.Router.navigate('tournament'); } }, [ 
         el('span', { className: 'sport-card-emoji' }, ['🏆']), 
         el('div', { className: 'sport-card-title' }, ['New Tournament']), 
-        el('div', { className: 'sport-card-desc' }, ['Create a multi-match event (Groups & Knockouts)']) 
+        el('div', { className: 'sport-card-desc' }, ['Create a custom tournament (Groups & Knockouts)']) 
     ]));
     cards.appendChild(el('div', { className: 'sport-card', onClick: () => { window.Router.navigate('history'); } }, [ 
         el('span', { className: 'sport-card-emoji' }, ['📜']), 
@@ -1749,42 +1928,102 @@ window.TournamentHub = {
       const file = e.target.files[0]; if (!file) return;
       const reader = new FileReader();
       reader.onload = (ev) => {
-          const lines = ev.target.result.split('\n');
-          let updatedCount = 0;
-          lines.forEach(line => {
+          const raw = ev.target.result;
+          const lines = raw.split('\n');
+          
+          // ── Parse all rows first ──
+          const fixtureRows = [];
+          lines.forEach((line, lineIdx) => {
               if (!line.trim()) return;
               const cols = line.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
-              if (cols.length < 3) return;
-              
+              if (lineIdx === 0 && isNaN(parseInt(cols[0]))) return; // skip header
               const matchNum = parseInt(cols[0]);
-              const teamAName = cols[1];
-              const teamBName = cols[2];
-              
-              if (matchNum && teamAName && teamBName) {
-                  let targetMatch = null;
-                  if (t.groups) t.groups.forEach(g => g.matches.forEach(m => { if(m.matchNum === matchNum) targetMatch = m; }));
-                  if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { if(m.matchNum === matchNum) targetMatch = m; }));
-                  
-                  if (targetMatch && targetMatch.status === 'pending') {
-                      const findTeam = (name) => t.teams.find(tm => tm.name.toLowerCase() === name.toLowerCase());
-                      const tA = findTeam(teamAName);
-                      const tB = findTeam(teamBName);
-                      
-                      if (tA) targetMatch.teamAId = tA.id;
-                      if (tB) targetMatch.teamBId = tB.id;
-                      
-                      if (tA || tB) {
-                          updatedCount++;
-                          if (window.FBM.user) {
-                              const fm = {...targetMatch}; delete fm.teamA; delete fm.teamB;
-                              window.FBM.saveMatchMeta(fm);
+              if (!matchNum) return;
+              fixtureRows.push({
+                  matchNum,
+                  stage:   cols[1] || '',
+                  teamA:   cols[2] || '',
+                  teamB:   cols[3] || '',
+                  time:    cols[4] || '',
+                  court:   cols[5] || '',
+              });
+          });
+          if (fixtureRows.length === 0) { CustomAlert.show('No valid fixture rows found. Expected: Match No., Stage, Team A, Team B, Time, Court', 'error'); return; }
+
+          // ── Detect if this is a full bootstrap (teams not yet in tournament) ──
+          const firstTeamA = fixtureRows[0]?.teamA?.trim();
+          const teamExists = t && t.teams && firstTeamA && t.teams.some(tm => tm.name.toLowerCase() === firstTeamA.toLowerCase());
+          const isFullBootstrap = !teamExists;
+
+          if (isFullBootstrap) {
+              // Full rebuild: create tournament from scratch from CSV
+              CustomAlert.show(`Detected ${fixtureRows.length} fixtures with teams not in current tournament. Import as a NEW tournament from this CSV?`, 'confirm', () => {
+                  // Use GGS roster if team names match
+                  const rosterMap = {};
+                  if (window.GGS_DATA) {
+                      window.GGS_DATA.teams.forEach(td => { rosterMap[td.name] = { p1: td.p1, p2: td.p2 }; });
+                  }
+                  const tourneyName = t ? t.name : 'Imported Tournament';
+                  const { meta, teams, matches } = window.buildTournamentFromFixtures(fixtureRows, rosterMap, tourneyName);
+                  TournamentManager.current = TournamentManager.hydrate(meta, teams, matches);
+                  localStorage.setItem('ACTIVE_TOURNEY_ID', meta.id);
+                  if (window.FBM.user) {
+                      window.FBM.createTournamentData(meta, teams, matches);
+                  } else {
+                      TournamentManager.save();
+                  }
+                  Toast.show(`Imported ${fixtureRows.length} fixtures → ${teams.length} teams, ${Object.keys(meta.numGroups > 0 ? window.GGS_DATA?.groups || {} : {}).length || '?'} groups built`);
+                  window.Router.render();
+              });
+              return;
+          }
+
+          // ── Incremental update: patch existing tournament matches ──
+          let updatedCount = 0;
+          fixtureRows.forEach(row => {
+              let targetMatch = null;
+              if (t.groups) t.groups.forEach(g => g.matches.forEach(m => { if(m.matchNum === row.matchNum) targetMatch = m; }));
+              if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { if(m.matchNum === row.matchNum) targetMatch = m; }));
+
+              if (targetMatch) {
+                  const findTeam = (name) => name ? t.teams.find(tm => tm.name.toLowerCase() === name.trim().toLowerCase()) : null;
+                  const tA = findTeam(row.teamA);
+                  const tB = findTeam(row.teamB);
+                  let changed = false;
+                  if (tA && targetMatch.status === 'pending') { targetMatch.teamAId = tA.id; changed = true; }
+                  if (tB && targetMatch.status === 'pending') { targetMatch.teamBId = tB.id; changed = true; }
+                  if (row.stage && targetMatch.status === 'pending') { targetMatch.stage = row.stage; changed = true; }
+                  if (row.time) { targetMatch.scheduledTime = row.time; changed = true; }
+                  if (row.court) { targetMatch.court = String(row.court); changed = true; }
+
+                  // Sync to correct group if stage changed
+                  if (row.stage && t.groups) {
+                      const grpMatch = row.stage.match(/Group\s+([A-Z])/i);
+                      if (grpMatch) {
+                          const grpId = grpMatch[1].toUpperCase();
+                          const targetGroup = t.groups.find(g => g.id === grpId);
+                          if (targetGroup && !targetGroup.matches.find(mx => mx.id === targetMatch.id)) {
+                              t.groups.forEach(g => {
+                                  const idx = g.matches.findIndex(mx => mx.id === targetMatch.id);
+                                  if (idx !== -1 && g.id !== grpId) g.matches.splice(idx, 1);
+                              });
+                              targetGroup.matches.push(targetMatch);
                           }
+                          // Update groupId on match
+                          targetMatch.groupId = grpId;
                       }
+                  }
+
+                  if (changed) {
+                      updatedCount++;
+                      if (window.FBM.user) { const fm = {...targetMatch}; delete fm.teamA; delete fm.teamB; window.FBM.saveMatchMeta(fm); }
                   }
               }
           });
+
+          TournamentManager._updateStandings && TournamentManager._updateStandings();
           if (!window.FBM.user) TournamentManager.save();
-          Toast.show(`Updated ${updatedCount} match slots from CSV`);
+          Toast.show(`CSV applied — ${updatedCount} fixture(s) updated. Group Stage synced.`);
           window.Router.render();
       };
       reader.readAsText(file);
@@ -1797,25 +2036,16 @@ window.TournamentHub = {
       allMatches.sort((a,b) => a.matchNum - b.matchNum);
 
       let csvContent = "data:text/csv;charset=utf-8,";
-      csvContent += "Match No.,Stage,Team A,Team B,Date & Time,Court,Status,Result\n";
+      csvContent += "Match No.,Stage,Team A,Team B,Date & Time,Court No.,Status,Result\n";
 
       allMatches.forEach(m => {
           const teamA = t.teams.find(tm => tm.id === m.teamAId)?.name || m.labelA || 'TBD';
           const teamB = t.teams.find(tm => tm.id === m.teamBId)?.name || m.labelB || 'TBD';
           const status = m.status === 'completed' ? 'Completed' : (m.status === 'live' ? 'Live' : 'Scheduled');
           const result = m.status === 'completed' ? `${m.scoreA} - ${m.scoreB}` : '';
-          
-          const row = [
-              m.matchNum, 
-              `"${m.stage}"`, 
-              `"${teamA}"`, 
-              `"${teamB}"`, 
-              "[          ]", 
-              "[          ]", 
-              status, 
-              result
-          ].join(",");
-          
+          const time = m.scheduledTime || '';
+          const court = m.court || '';
+          const row = [m.matchNum, `"${m.stage}"`, `"${teamA}"`, `"${teamB}"`, `"${time}"`, court, status, result].join(',');
           csvContent += row + "\n";
       });
 
@@ -1906,38 +2136,660 @@ window.TournamentHub = {
       
       header.appendChild(actions); wrap.appendChild(header);
 
+      // Show umpire session info bar if logged in as umpire
+      const umpSessIdBanner = localStorage.getItem('UMPIRE_SESSION_ID');
+      const umpSessNameBanner = localStorage.getItem('UMPIRE_SESSION_NAME');
+      if (umpSessIdBanner && isSpectator) {
+          const umpBanner = el('div', {style:{background:'rgba(79,195,247,0.1)', border:'1px solid rgba(79,195,247,0.3)', borderRadius:'var(--radius-sm)', padding:'8px 16px', marginBottom:'16px', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'0.85rem'}});
+          umpBanner.appendChild(el('span', {}, [`🎙️ Umpire Session: `+el('strong',{},['x']).outerHTML.replace('>x<',`><strong>${umpSessNameBanner}</strong> (${umpSessIdBanner})<`)+'']));
+          umpBanner.innerHTML = `🎙️ Umpire Session: <strong style="color:var(--accent-primary)">${umpSessNameBanner}</strong> <span style="color:var(--text-muted)">(ID: ${umpSessIdBanner})</span> — <a onclick="localStorage.removeItem('UMPIRE_SESSION_ID');localStorage.removeItem('UMPIRE_SESSION_NAME');localStorage.setItem('USER_ROLE','spectator');window.Router.navigate('home');" style="color:var(--accent-danger);cursor:pointer;">Exit Session</a>`;
+          wrap.appendChild(umpBanner);
+      }
+
       const tabs = el('div', { className: 'tourney-tabs' });
       const tabOptions = [];
+      const umpirePerms = this._getUmpirePermissions ? this._getUmpirePermissions() : {};
+      const umpSessId = localStorage.getItem('UMPIRE_SESSION_ID');
       
-      tabOptions.push(['schedule', '📅 Master Schedule']);
-      if(t.format === 'groups') {
-          tabOptions.push(['groups', '📊 Group Stages']);
-      }
-      tabOptions.push(['bracket', '🏆 Knockout Bracket']);
+      // Spectator = fan OR umpire. Umpires get filtered tabs based on permissions.
+      const isUmpireSession = isSpectator && !!umpSessId;
+      const canSeeTeams    = !isSpectator || (isUmpireSession && umpirePerms.canViewTeams !== false);
+      const canSeeSchedule = !isSpectator || (isUmpireSession && umpirePerms.canViewSchedule !== false);
+      const canSeeGroups   = !isSpectator || (isUmpireSession && umpirePerms.canViewGroups !== false);
+      const canSeeBracket  = !isSpectator || (isUmpireSession && umpirePerms.canViewBracket !== false);
+      const canSeeStats    = !isSpectator || (isUmpireSession && umpirePerms.canViewStats !== false);
       
-      if (!this.activeTab || !tabOptions.find(opt => opt[0] === this.activeTab)) this.activeTab = tabOptions[0][0];
+      if (canSeeTeams)    tabOptions.push(['teams',    '👥 Teams & Players']);
+      if (canSeeSchedule) tabOptions.push(['schedule', '📅 Master Schedule']);
+      if (t.format === 'groups' && canSeeGroups) tabOptions.push(['groups', '📊 Group Stages']);
+      if (canSeeBracket)  tabOptions.push(['bracket',  '🏆 Knockout Bracket']);
+      if (canSeeStats)    tabOptions.push(['playerstats', '📈 Player Stats']);
+      if (!isSpectator)   tabOptions.push(['settings', '⚙️ Settings']);
+      
+      if (!this.activeTab || !tabOptions.find(opt => opt[0] === this.activeTab)) this.activeTab = tabOptions[0]?.[0] || 'teams';
       tabOptions.forEach(([key, label]) => { tabs.appendChild(el('div', { className: 'tourney-tab' + (this.activeTab === key ? ' active' : ''), onClick: () => { this.activeTab = key; window.Router.render(); } }, [label])); });
       wrap.appendChild(tabs);
 
-      if(this.activeTab === 'schedule') wrap.appendChild(this._renderSchedule(t, isSpectator));
-      if(this.activeTab === 'groups') wrap.appendChild(this._renderGroupsTab(t, isSpectator));
-      if(this.activeTab === 'bracket') wrap.appendChild(this._renderBracket(t, isSpectator));
+      if (this.activeTab === 'teams')       wrap.appendChild(this._renderTeamsTab(t, isSpectator));
+      if (this.activeTab === 'schedule')    wrap.appendChild(this._renderSchedule(t, isSpectator));
+      if (this.activeTab === 'groups')      wrap.appendChild(this._renderGroupsTab(t, isSpectator));
+      if (this.activeTab === 'bracket')     wrap.appendChild(this._renderBracket(t, isSpectator));
+      if (this.activeTab === 'playerstats') wrap.appendChild(this._renderPlayerStats(t));
+      if (this.activeTab === 'settings' && !isSpectator) wrap.appendChild(this._renderSettingsTab(t));
       container.appendChild(wrap);
   },
 
-  /* --- CHRONOLOGICAL MASTER SCHEDULE --- */
+  /* Permission helpers */
+  _getUmpirePermissions() {
+      try { return JSON.parse(localStorage.getItem('UMPIRE_PERMISSIONS')||'{}'); } catch(e) { return {}; }
+  },
+  _saveUmpirePermissions(perms) {
+      localStorage.setItem('UMPIRE_PERMISSIONS', JSON.stringify(perms));
+  },
+
+  /* ═══════════════════════════════════════════════════════════════
+     TEAMS & PLAYERS TAB  — add / export / search
+  ═══════════════════════════════════════════════════════════════ */
+  _renderTeamsTab(t, isSpectator) {
+      const wrap = el('div', { className: 'w-full' });
+      const isDoubles = t.settings?.matchType === 'doubles';
+
+      /* ── Top action bar ─────────────────────────────────────── */
+      const topBar = el('div', {className:'flex justify-between items-center mb-md flex-wrap gap-sm'});
+
+      const statChip = (icon, val, label) => {
+          const c = el('div', {style:{display:'flex', alignItems:'center', gap:'6px', background:'rgba(255,255,255,0.06)', padding:'6px 12px', borderRadius:'var(--radius-sm)', border:'1px solid var(--border-color)'}});
+          c.innerHTML = `<span style="font-size:1.1rem">${icon}</span><span style="font-weight:800;color:var(--text-primary)">${val}</span><span style="font-size:0.75rem;color:var(--text-muted);font-weight:600">${label}</span>`;
+          return c;
+      };
+      const statsRow = el('div', {style:{display:'flex', gap:'8px', flexWrap:'wrap', alignItems:'center'}});
+      statsRow.appendChild(statChip('👥', t.teams.length, 'Teams'));
+      statsRow.appendChild(statChip('🏸', t.teams.reduce((n,tm)=>n+(tm.players||[]).filter(p=>p?.name?.trim()).length,0), 'Players'));
+      statsRow.appendChild(statChip('🔷', t.groups?.length || 0, 'Groups'));
+      if (!isSpectator) {
+          statsRow.appendChild(el('span', {style:{fontSize:'0.75rem', color:'var(--text-muted)', fontStyle:'italic', paddingLeft:'4px'}}, ['✏️ Click any name to edit']));
+      }
+      topBar.appendChild(statsRow);
+
+      const actionBtns = el('div', {className:'teams-action-bar', style:{display:'flex', gap:'8px', flexWrap:'wrap', alignItems:'center'}});
+
+      /* Search */
+      const searchInp = el('input', {type:'text', placeholder:'🔍 Search team or player…', style:{width:'200px', fontSize:'0.85rem', padding:'8px 12px'}});
+
+      /* Export CSV */
+      const exportBtn = el('button', {className:'btn btn-success btn-sm', onClick: () => {
+          let csv = 'Group,#,Team Name,Player 1,Player 2\n';
+          const groupOrder = t.groups ? t.groups.map(g => g.id) : [];
+          const grouped = {};
+          groupOrder.forEach(gId => grouped[gId] = []);
+          t.teams.forEach(tm => {
+              const gId = tm.groupId || (t.groups && t.groups.find(g => g.teams.find(x=>x.id===tm.id))?.id);
+              if (gId && grouped[gId]) grouped[gId].push(tm);
+              else { grouped[''] = grouped[''] || []; grouped[''].push(tm); }
+          });
+          [...groupOrder, ''].forEach(gId => {
+              (grouped[gId] || []).forEach((tm, i) => {
+                  const p1 = tm.players?.[0]?.name?.trim() || '';
+                  const p2 = tm.players?.[1]?.name?.trim() || '';
+                  csv += `"${gId ? 'Group '+gId : 'Unassigned'}",${i+1},"${tm.name}","${p1}","${p2}"\n`;
+              });
+          });
+          const link = document.createElement('a');
+          link.href = 'data:text/csv;charset=utf-8,' + encodeURI(csv);
+          link.download = `${t.name.replace(/\s+/g,'_')}_Teams.csv`;
+          link.click();
+          Toast.show('Teams exported as CSV');
+      }}, ['⬇️ Export Teams CSV']);
+
+      /* Add team — master only */
+      if (!isSpectator) {
+          const addBtn = el('button', {className:'btn btn-primary btn-sm', onClick: () => {
+              const overlay = el('div', {className:'modal-overlay'});
+              const modal = el('div', {className:'modal', style:{maxWidth:'440px'}});
+              modal.appendChild(el('div', {className:'modal-title'}, ['➕ Add New Team']));
+
+              const groupIds = (t.groups || []).map(g => g.id);
+              const tmNameInp = el('input', {type:'text', placeholder:'Team Name', style:{marginBottom:'10px'}});
+              const p1Inp = el('input', {type:'text', placeholder:'Player 1 Name', style:{marginBottom:'10px'}});
+              const p2Inp = el('input', {type:'text', placeholder:'Player 2 Name (for doubles)', style:{marginBottom:'10px'}});
+
+              let selGroup = groupIds[0] || '';
+              const grpSel = el('select', {style:{marginBottom:'16px'}, onChange: e => selGroup = e.target.value});
+              grpSel.appendChild(el('option', {value:''}, ['— No Group —']));
+              groupIds.forEach(gId => grpSel.appendChild(el('option', {value:gId}, [`Group ${gId}`])));
+
+              [tmNameInp, p1Inp, isDoubles ? p2Inp : null, groupIds.length ? grpSel : null]
+                  .filter(Boolean).forEach(el => modal.appendChild(el));
+
+              const btnRow = el('div', {className:'flex gap-sm mt-md', style:{justifyContent:'flex-end'}});
+              btnRow.appendChild(el('button', {className:'btn btn-ghost', onClick:()=>overlay.remove()}, ['Cancel']));
+              btnRow.appendChild(el('button', {className:'btn btn-primary', onClick:()=>{
+                  const name = tmNameInp.value.trim();
+                  if (!name) { Toast.show('Enter a team name', 'error'); return; }
+                  const players = [];
+                  if (p1Inp.value.trim()) players.push({id:uid(), name:p1Inp.value.trim()});
+                  if (isDoubles && p2Inp.value.trim()) players.push({id:uid(), name:p2Inp.value.trim()});
+                  if (!players.length) players.push({id:uid(), name:`${name} P1`});
+
+                  const newTeam = {id:uid(), name, tournamentId:t.id, players, groupId: selGroup || null};
+                  t.teams.push(newTeam);
+
+                  // Add to group roster if selected
+                  if (selGroup) {
+                      const grp = t.groups?.find(g=>g.id===selGroup);
+                      if (grp) grp.teams.push({...newTeam, played:0, wins:0});
+                  }
+                  if (window.FBM.user) {
+                      window.FBM.db && setDoc(doc(window.FBM.db, ...window.FBM.basePath, 'teams', newTeam.id), newTeam).catch(()=>{});
+                  } else { TournamentManager.save(); }
+                  overlay.remove();
+                  Toast.show(`✅ ${name} added!`);
+                  window.Router.render();
+              }}, ['Add Team']));
+              modal.appendChild(btnRow);
+              overlay.appendChild(modal); document.body.appendChild(overlay);
+              setTimeout(()=>tmNameInp.focus(),80);
+          }}, ['+ Add Team']);
+          actionBtns.appendChild(addBtn);
+      }
+      actionBtns.appendChild(exportBtn);
+      actionBtns.appendChild(searchInp);
+      topBar.appendChild(actionBtns);
+      wrap.appendChild(topBar);
+
+      /* ── Build group buckets ─────────────────────────────────── */
+      const groupOrder = t.groups ? t.groups.map(g => g.id) : [];
+      const buckets = {};
+      const noGroup = [];
+      groupOrder.forEach(gId => { buckets[gId] = []; });
+      t.teams.forEach(tm => {
+          const gId = tm.groupId || (t.groups?.find(g=>g.teams?.find(x=>x.id===tm.id))?.id);
+          if (gId && buckets[gId] !== undefined) buckets[gId].push(tm);
+          else noGroup.push(tm);
+      });
+
+      const GRP_COLORS = ['#4fc3f7','#ffa726','#66bb6a','#ef5350','#ab47bc','#26c6da','#d4e157','#ff7043'];
+
+      const outerGrid = el('div', {id:'teams-outer-grid', style:{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:'16px'}});
+
+      /* ── Central save helper: persists name changes everywhere ── */
+      const persistTeamRename = (teamId, newName, newPlayers) => {
+          // Update in t.teams
+          const tm = t.teams.find(x=>x.id===teamId);
+          if (!tm) return;
+          if (newName !== undefined) tm.name = newName;
+          if (newPlayers !== undefined) tm.players = newPlayers;
+          // Update in group.teams (standings objects)
+          if (t.groups) t.groups.forEach(g => {
+              const gt = g.teams.find(x=>x.id===teamId);
+              if (gt) { if (newName!==undefined) gt.name=newName; }
+          });
+          // Persist
+          if (window.FBM.user) { window.FBM.saveTeam(tm); }
+          else { TournamentManager.save(); }
+      };
+
+      const renderGroup = (gId, teams, colorIdx) => {
+          if (teams.length === 0 && gId) return; // skip empty named groups
+          const color = GRP_COLORS[colorIdx % GRP_COLORS.length];
+          const card = el('div', {className:'card', style:{padding:'0', overflow:'hidden', border:`1px solid ${color}33`}});
+
+          const hdr = el('div', {style:{background:`${color}12`, borderBottom:`2px solid ${color}40`, padding:'10px 16px', display:'flex', justifyContent:'space-between', alignItems:'center'}});
+          hdr.appendChild(el('span', {style:{fontFamily:"'Rajdhani',sans-serif", fontWeight:'800', fontSize:'1.05rem', color, letterSpacing:'0.08em'}}, [gId ? `GROUP  ${gId}` : 'UNASSIGNED']));
+          hdr.appendChild(el('span', {style:{fontSize:'0.75rem', color:'var(--text-muted)', fontWeight:'700', background:'rgba(0,0,0,0.2)', padding:'2px 8px', borderRadius:'10px'}}, [`${teams.length} team${teams.length!==1?'s':''}`]));
+          card.appendChild(hdr);
+
+          teams.forEach((tm, idx) => {
+              const row = el('div', {
+                  className:'team-row',
+                  style:{padding:'10px 16px', borderBottom: idx<teams.length-1?'1px solid var(--border-color)':'none', display:'flex', flexDirection:'column', gap:'6px'}
+              });
+
+              if (!isSpectator) {
+                  /* ── EDITABLE mode (master console) ── */
+                  // Team name input
+                  const nameRow = el('div', {style:{display:'flex', alignItems:'center', gap:'8px'}});
+                  const badge = el('span', {style:{minWidth:'24px', height:'24px', borderRadius:'50%', background:color+'20', color, fontSize:'0.72rem', fontWeight:'900', display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${color}40`, flexShrink:'0'}}, [String(idx+1)]);
+                  nameRow.appendChild(badge);
+                  const nameInp = el('input', {type:'text', value:tm.name, title:'Click to edit team name',
+                      style:{flex:'1', padding:'5px 10px', fontSize:'0.88rem', fontWeight:'700', background:'rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'6px', color:'var(--text-primary)', transition:'border 0.2s'}});
+                  nameInp.addEventListener('focus', ()=>nameInp.style.borderColor='var(--accent-primary)');
+                  nameInp.addEventListener('blur', ()=>{
+                      nameInp.style.borderColor='rgba(255,255,255,0.08)';
+                      const val = nameInp.value.trim();
+                      if (val && val !== tm.name) {
+                          persistTeamRename(tm.id, val, undefined);
+                          Toast.show(`✏️ Team renamed → ${val}`);
+                          // Update all match labels referencing this team
+                          const updateMatchLabels = (matches) => matches.forEach(m => {
+                              if (m.teamAId===tm.id) m.labelA=val;
+                              if (m.teamBId===tm.id) m.labelB=val;
+                          });
+                          if (t.groups) t.groups.forEach(g=>updateMatchLabels(g.matches));
+                          if (t.koMatches) t.koMatches.forEach(r=>updateMatchLabels(r));
+                      }
+                  });
+                  nameRow.appendChild(nameInp);
+                  row.appendChild(nameRow);
+
+                  // Player name inputs
+                  const players = tm.players || [];
+                  if (players.length) {
+                      const pRow = el('div', {style:{display:'flex', gap:'8px', paddingLeft:'32px', flexWrap:'wrap'}});
+                      players.forEach((p, pi) => {
+                          const pWrap = el('div', {style:{display:'flex', alignItems:'center', gap:'5px', flex:'1', minWidth:'140px'}});
+                          pWrap.appendChild(el('span', {style:{fontSize:'0.65rem', background:'rgba(255,255,255,0.07)', color:'var(--text-muted)', padding:'1px 6px', borderRadius:'3px', fontWeight:'700', flexShrink:'0'}}, [`P${pi+1}`]));
+                          const pInp = el('input', {type:'text', value:p.name||'', title:`Click to edit Player ${pi+1} name`,
+                              style:{flex:'1', padding:'4px 8px', fontSize:'0.8rem', background:'rgba(0,0,0,0.2)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:'5px', color:'var(--text-secondary)', transition:'border 0.2s'}});
+                          pInp.addEventListener('focus', ()=>pInp.style.borderColor='var(--accent-primary)');
+                          pInp.addEventListener('blur', ()=>{
+                              pInp.style.borderColor='rgba(255,255,255,0.06)';
+                              const val = pInp.value.trim();
+                              if (val !== (p.name||'').trim()) {
+                                  p.name = val;
+                                  persistTeamRename(tm.id, undefined, [...players]);
+                                  Toast.show(`✏️ Player ${pi+1} updated`);
+                              }
+                          });
+                          pWrap.appendChild(pInp);
+                          pRow.appendChild(pWrap);
+                      });
+                      row.appendChild(pRow);
+                  }
+              } else {
+                  /* ── READ-ONLY mode (umpire / spectator) ── */
+                  const nameRow = el('div', {style:{display:'flex', alignItems:'center', gap:'9px'}});
+                  const badge = el('span', {style:{minWidth:'24px', height:'24px', borderRadius:'50%', background:color+'20', color, fontSize:'0.72rem', fontWeight:'900', display:'flex', alignItems:'center', justifyContent:'center', border:`1px solid ${color}40`, flexShrink:'0'}}, [String(idx+1)]);
+                  nameRow.appendChild(badge);
+                  nameRow.appendChild(el('span', {style:{fontWeight:'700', fontSize:'0.95rem', color:'var(--text-primary)'}}, [escapeHTML(tm.name)]));
+                  row.appendChild(nameRow);
+
+                  const players = (tm.players||[]).filter(p=>p?.name?.trim());
+                  if (players.length) {
+                      const pRow = el('div', {style:{display:'flex', gap:'16px', paddingLeft:'33px', flexWrap:'wrap'}});
+                      players.forEach((p,pi)=>{
+                          const pTag = el('div', {style:{display:'flex', alignItems:'center', gap:'5px'}});
+                          pTag.appendChild(el('span', {style:{fontSize:'0.65rem', background:'rgba(255,255,255,0.07)', color:'var(--text-muted)', padding:'1px 6px', borderRadius:'3px', fontWeight:'700'}}, [`P${pi+1}`]));
+                          pTag.appendChild(el('span', {style:{fontSize:'0.82rem', color:'var(--text-secondary)', fontWeight:'500'}}, [escapeHTML(p.name.trim())]));
+                          pRow.appendChild(pTag);
+                      });
+                      row.appendChild(pRow);
+                  }
+              }
+              card.appendChild(row);
+          });
+          outerGrid.appendChild(card);
+      };
+
+      groupOrder.forEach((gId,idx) => renderGroup(gId, buckets[gId]||[], idx));
+      if (noGroup.length) renderGroup(null, noGroup, groupOrder.length);
+
+      wrap.appendChild(outerGrid);
+
+      /* ── Live search ──────────────────────────────────────────── */
+      searchInp.addEventListener('input', () => {
+          const q = searchInp.value.trim().toLowerCase();
+          wrap.querySelectorAll('.team-row').forEach(r => { r.style.display=(!q||r.textContent.toLowerCase().includes(q))?'':'none'; });
+          wrap.querySelectorAll('.card').forEach(c => { c.style.display=[...c.querySelectorAll('.team-row')].some(r=>r.style.display!=='none')?'':'none'; });
+      });
+
+      return wrap;
+  },
+
+  /* ═══════════════════════════════════════════════════════════════
+     PLAYER STATS TAB  — all players, match history, win rates
+  ═══════════════════════════════════════════════════════════════ */
+  _renderPlayerStats(t) {
+      const wrap = el('div', {className:'w-full'});
+
+      /* Gather all completed matches */
+      const allMatches = [];
+      if (t.groups) t.groups.forEach(g=>g.matches.forEach(m=>{ if(m.status==='completed') allMatches.push(m); }));
+      if (t.koMatches) t.koMatches.forEach(r=>r.forEach(m=>{ if(m.status==='completed'&&!m.isBye) allMatches.push(m); }));
+
+      /* Build player → team map and stats */
+      const playerStats = {}; // playerId → {name, teamName, groupId, matchesPlayed, matchesWon}
+      t.teams.forEach(tm => {
+          const gId = tm.groupId || (t.groups?.find(g=>g.teams?.find(x=>x.id===tm.id))?.id) || '—';
+          (tm.players||[]).forEach(p => {
+              if (!p?.name?.trim()) return;
+              playerStats[p.id] = { id:p.id, name:p.name.trim(), teamId:tm.id, teamName:tm.name, groupId:gId, matchesPlayed:0, matchesWon:0, ptsFor:0, ptsAgst:0 };
+          });
+      });
+
+      /* Attribute team match results + points to players */
+      allMatches.forEach(m => {
+          const teamA = t.teams.find(tm=>tm.id===m.teamAId);
+          const teamB = t.teams.find(tm=>tm.id===m.teamBId);
+          const wonA  = m.winnerId === m.teamAId;
+          const wonB  = m.winnerId === m.teamBId;
+          // Derive game scores from fullState if available, else use match scoreA/scoreB
+          let ptsA = 0, ptsB = 0;
+          if (m.fullState && m.fullState.games) {
+              m.fullState.games.forEach(g => { ptsA += g.scoreA||0; ptsB += g.scoreB||0; });
+          } else {
+              // scoreA/scoreB on the match object are game counts (e.g. 2-0), not points
+              // Use a rough heuristic: winning team gets 21 per game won
+              ptsA = (m.scoreA||0) * 21; ptsB = (m.scoreB||0) * 21;
+          }
+          [teamA, teamB].forEach((tm, side) => {
+              if (!tm) return;
+              const won = side===0 ? wonA : wonB;
+              const ptsFor  = side===0 ? ptsA : ptsB;
+              const ptsAgst = side===0 ? ptsB : ptsA;
+              (tm.players||[]).forEach(p => {
+                  if (playerStats[p.id]) {
+                      playerStats[p.id].matchesPlayed++;
+                      if (won) playerStats[p.id].matchesWon++;
+                      playerStats[p.id].ptsFor  = (playerStats[p.id].ptsFor||0)  + ptsFor;
+                      playerStats[p.id].ptsAgst = (playerStats[p.id].ptsAgst||0) + ptsAgst;
+                  }
+              });
+          });
+      });
+
+      const players = Object.values(playerStats).sort((a,b)=>{
+          const ar = a.matchesPlayed ? a.matchesWon/a.matchesPlayed : 0;
+          const br = b.matchesPlayed ? b.matchesWon/b.matchesPlayed : 0;
+          if (br!==ar) return br-ar;
+          if (b.matchesWon !== a.matchesWon) return b.matchesWon - a.matchesWon;
+          const netA = (a.ptsFor||0)-(a.ptsAgst||0);
+          const netB = (b.ptsFor||0)-(b.ptsAgst||0);
+          return netB - netA;
+      });
+
+      /* Top bar */
+      const topBar = el('div', {className:'stats-top-bar flex justify-between items-center mb-md flex-wrap gap-sm'});
+      const totalPlayed = allMatches.length;
+
+      const chip = (icon, val, lbl) => {
+          const c = el('div', {style:{display:'flex',alignItems:'center',gap:'6px',background:'rgba(255,255,255,0.06)',padding:'6px 12px',borderRadius:'var(--radius-sm)',border:'1px solid var(--border-color)'}});
+          c.innerHTML=`<span style="font-size:1.1rem">${icon}</span><span style="font-weight:800;color:var(--text-primary)">${val}</span><span style="font-size:0.75rem;color:var(--text-muted);font-weight:600">${lbl}</span>`;
+          return c;
+      };
+      const sr = el('div', {className:'stats-chips-row', style:{display:'flex',gap:'8px',flexWrap:'wrap'}});
+      sr.appendChild(chip('👤', players.length, 'Players'));
+      sr.appendChild(chip('🎯', totalPlayed, 'Matches Done'));
+      sr.appendChild(chip('🏆', players.filter(p=>p.matchesWon>0).length, 'Players with Wins'));
+      sr.appendChild(chip('📊', players.length > 0 ? players.filter(p=>p.matchesPlayed>0).length : 0, 'Active'));
+      topBar.appendChild(sr);
+
+      /* Search + filter */
+      const rightBar = el('div', {style:{display:'flex',gap:'8px',flexWrap:'wrap'}});
+      const psSearch = el('input', {type:'text', placeholder:'🔍 Search player or team…', style:{width:'200px',fontSize:'0.85rem',padding:'8px 12px'}});
+      const grpFilter = el('select', {style:{fontSize:'0.85rem',padding:'8px 12px',width:'140px'}});
+      grpFilter.appendChild(el('option',{value:''},'All Groups'));
+      (t.groups||[]).forEach(g=>grpFilter.appendChild(el('option',{value:g.id},[`Group ${g.id}`])));
+      rightBar.appendChild(grpFilter); rightBar.appendChild(psSearch);
+      topBar.appendChild(rightBar);
+      wrap.appendChild(topBar);
+
+      /* ── Summary podium if matches played ─────────────────── */
+      if (totalPlayed > 0 && players.filter(p=>p.matchesPlayed>0).length >= 3) {
+          const podiumCard = el('div', {className:'card mb-md', style:{padding:'20px'}});
+          podiumCard.appendChild(el('div', {className:'settings-section-title mb-md'}, ['🏅 Top Performers']));
+          const podium = el('div', {style:{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'12px'}});
+          const medals = ['🥇','🥈','🥉'];
+          const podiumColors = ['#ffd700','#c0c0c0','#cd7f32'];
+          players.filter(p=>p.matchesPlayed>0).slice(0,3).forEach((p,i)=>{
+              const pc = el('div', {style:{textAlign:'center',padding:'16px 8px',background:`${podiumColors[i]}10`,borderRadius:'var(--radius-md)',border:`1px solid ${podiumColors[i]}40`}});
+              pc.appendChild(el('div',{style:{fontSize:'2rem',marginBottom:'4px'}},[medals[i]]));
+              pc.appendChild(el('div',{style:{fontWeight:'800',fontSize:'0.9rem',color:'var(--text-primary)',lineHeight:'1.3',marginBottom:'4px'}},[escapeHTML(p.name)]));
+              pc.appendChild(el('div',{style:{fontSize:'0.75rem',color:'var(--text-muted)',marginBottom:'6px'}},[escapeHTML(p.teamName)]));
+              const wr = Math.round((p.matchesWon/p.matchesPlayed)*100);
+              pc.appendChild(el('div',{style:{fontWeight:'900',fontSize:'1.3rem',color:podiumColors[i]}},[`${wr}%`]));
+              pc.appendChild(el('div',{style:{fontSize:'0.7rem',color:'var(--text-muted)',fontWeight:'600'}},[`${p.matchesWon}W / ${p.matchesPlayed-p.matchesWon}L`]));
+              podium.appendChild(pc);
+          });
+          podiumCard.appendChild(podium);
+          wrap.appendChild(podiumCard);
+      }
+
+      /* ── Full player table ────────────────────────────────── */
+      const tableCard = el('div', {className:'card', style:{padding:'0', overflow:'hidden'}});
+      const tableWrap = el('div', {style:{overflowX:'auto'}});
+      const table = el('table', {className:'groups-table', style:{width:'100%',minWidth:'560px'}});
+
+      /* Header */
+      table.appendChild(el('thead',{},[el('tr',{},[
+          el('th',{style:{width:'4%',textAlign:'center'}},'#'),
+          el('th',{style:{width:'18%'}},'Player'),
+          el('th',{style:{width:'18%'}},'Team'),
+          el('th',{className:'ps-col-grp', style:{width:'6%',textAlign:'center'}},'Grp'),
+          el('th',{style:{width:'8%',textAlign:'center'}},'MP'),
+          el('th',{style:{width:'7%',textAlign:'center'}},'Won'),
+          el('th',{className:'ps-col-lost', style:{width:'7%',textAlign:'center'}},'Lost'),
+          el('th',{style:{width:'11%',textAlign:'center'}},'Win %'),
+          el('th',{className:'ps-col-lost', style:{width:'9%',textAlign:'center'}},'Pts For'),
+          el('th',{className:'ps-col-lost', style:{width:'9%',textAlign:'center'}},'Pts Vs'),
+          el('th',{className:'ps-col-lost', style:{width:'9%',textAlign:'center'}},'Net Pts'),
+      ])]));
+
+      const tbody = el('tbody');
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      tableCard.appendChild(tableWrap);
+      wrap.appendChild(tableCard);
+
+      const GRP_COLORS = ['#4fc3f7','#ffa726','#66bb6a','#ef5350','#ab47bc','#26c6da','#d4e157','#ff7043'];
+      const groupColorMap = {};
+      (t.groups||[]).forEach((g,i) => { groupColorMap[g.id] = GRP_COLORS[i%GRP_COLORS.length]; });
+
+      const renderRows = () => {
+          tbody.innerHTML = '';
+          const q = psSearch.value.trim().toLowerCase();
+          const gf = grpFilter.value;
+          let rank = 0;
+          players.forEach(p => {
+              if (q && !p.name.toLowerCase().includes(q) && !p.teamName.toLowerCase().includes(q)) return;
+              if (gf && p.groupId !== gf) return;
+              rank++;
+              const wr = p.matchesPlayed ? Math.round((p.matchesWon/p.matchesPlayed)*100) : 0;
+              const lost = p.matchesPlayed - p.matchesWon;
+              const gc = groupColorMap[p.groupId] || 'var(--text-muted)';
+              const wrColor = wr>=70?'var(--accent-success)':wr>=40?'var(--accent-warning)':'var(--accent-danger)';
+              const bar = `<div style="width:100%;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;margin-top:3px"><div style="width:${wr}%;height:4px;background:${wrColor};border-radius:2px;transition:width 0.4s"></div></div>`;
+              const tr = el('tr', {className:'ps-row'});
+              const netPts = (p.ptsFor||0) - (p.ptsAgst||0);
+              const netColor = netPts>0?'var(--accent-success)':netPts<0?'var(--accent-danger)':'var(--text-muted)';
+              tr.innerHTML = `
+                  <td style="text-align:center;color:var(--text-muted);font-weight:700;font-size:0.85rem">${rank}</td>
+                  <td style="font-weight:700;color:var(--text-primary)">${escapeHTML(p.name)}</td>
+                  <td style="color:var(--text-secondary);font-size:0.88rem">${escapeHTML(p.teamName)}</td>
+                  <td class="ps-col-grp" style="text-align:center"><span style="background:${gc}20;color:${gc};padding:2px 8px;border-radius:10px;font-size:0.75rem;font-weight:800">${p.groupId}</span></td>
+                  <td style="text-align:center;font-weight:700">${p.matchesPlayed}</td>
+                  <td style="text-align:center;font-weight:700;color:var(--accent-success)">${p.matchesWon}</td>
+                  <td class="ps-col-lost" style="text-align:center;font-weight:700;color:var(--accent-danger)">${lost}</td>
+                  <td style="text-align:center"><span style="font-weight:900;color:${wrColor}">${p.matchesPlayed?wr+'%':'—'}</span>${p.matchesPlayed?bar:''}</td>
+                  <td class="ps-col-lost" style="text-align:center;font-weight:600;color:var(--text-secondary)">${p.ptsFor||0}</td>
+                  <td class="ps-col-lost" style="text-align:center;font-weight:600;color:var(--text-secondary)">${p.ptsAgst||0}</td>
+                  <td class="ps-col-lost" style="text-align:center;font-weight:800;color:${netColor}">${netPts>0?'+'+netPts:netPts}</td>
+              `;
+              tbody.appendChild(tr);
+          });
+          if (rank===0) {
+              const tr = el('tr');
+              const emptyTd = el('td', {colSpan:'8', style:{textAlign:'center',padding:'32px',color:'var(--text-muted)',fontStyle:'italic'}}, [
+                  totalPlayed===0 ? 'No matches completed yet — stats will appear here as matches are played.' : 'No players match your search.'
+              ]);
+              tr.appendChild(emptyTd);
+              tbody.appendChild(tr);
+          }
+      };
+      renderRows();
+      psSearch.addEventListener('input', renderRows);
+      grpFilter.addEventListener('change', renderRows);
+
+      return wrap;
+  },
+
+  /* ═══════════════════════════════════════════════════════════════
+     SETTINGS TAB  — umpire management + permissions + PIN
+     Fully rebuilt for clarity and reliable toggle behaviour
+  ═══════════════════════════════════════════════════════════════ */
+  _renderSettingsTab(t) {
+      const wrap = el('div', { className: 'w-full' });
+      let perms  = this._getUmpirePermissions();
+      let umpires = [];
+      try { umpires = JSON.parse(localStorage.getItem('REGISTERED_UMPIRES')||'[]'); } catch(e){}
+
+      /* ── helper: section card ─────────────────────────────── */
+      const section = (emoji, title, desc) => {
+          const card = el('div', {className:'card', style:{marginBottom:'20px', padding:'24px'}});
+          const hdr  = el('div', {className:'settings-section-title'});
+          hdr.textContent = `${emoji}  ${title}`;
+          card.appendChild(hdr);
+          if (desc) card.appendChild(el('div', {className:'text-sm text-secondary mb-md'}, [desc]));
+          return card;
+      };
+
+      /* ── helper: toggle row ───────────────────────────────── */
+      const toggleRow = (label, desc, key, defaultVal) => {
+          const current = perms[key] !== undefined ? !!perms[key] : defaultVal;
+          const row = el('div', {className:'setting-row', style:{userSelect:'none'}});
+
+          const info = el('div', {style:{flex:1, paddingRight:'16px'}});
+          info.appendChild(el('div', {style:{fontWeight:'600', color:'var(--text-primary)', fontSize:'0.9rem'}}, [label]));
+          if (desc) info.appendChild(el('div', {className:'text-xs text-muted', style:{marginTop:'2px'}}, [desc]));
+          row.appendChild(info);
+
+          /* toggle pill */
+          let val = current;
+          const pill = el('div', {style:{
+              width:'48px', height:'26px', borderRadius:'13px', position:'relative',
+              background: val ? 'var(--accent-success)' : 'rgba(255,255,255,0.12)',
+              border: '1.5px solid rgba(255,255,255,0.15)',
+              cursor:'pointer', flexShrink:'0', transition:'background 0.25s'
+          }});
+          const knob = el('div', {style:{
+              width:'20px', height:'20px', borderRadius:'50%', background:'#fff',
+              position:'absolute', top:'2px', left: val?'24px':'2px',
+              transition:'left 0.25s', boxShadow:'0 2px 4px rgba(0,0,0,0.35)'
+          }});
+          pill.appendChild(knob);
+
+          const setVal = (v) => {
+              val = v;
+              pill.style.background = v ? 'var(--accent-success)' : 'rgba(255,255,255,0.12)';
+              knob.style.left = v ? '24px' : '2px';
+              perms[key] = v;
+              this._saveUmpirePermissions(perms);
+              Toast.show(`${label}: ${v ? '✅ Enabled' : '⛔ Disabled'}`);
+          };
+          pill.addEventListener('click', () => setVal(!val));
+          row.appendChild(pill);
+          return row;
+      };
+
+      /* ═══ 1. UMPIRE ROSTER ═══════════════════════════════════ */
+      const umpCard = section('🎙️', 'Umpire Roster', 'Register umpires with a unique ID. They use this ID on the home screen to get their restricted view.');
+
+      /* Add form */
+      const addForm = el('div', {style:{display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'16px'}});
+      const idInp   = el('input', {type:'text', placeholder:'Umpire ID  e.g. UMP-01', style:{flex:'1', minWidth:'130px', textTransform:'uppercase'}});
+      const nmInp   = el('input', {type:'text', placeholder:'Full Name', style:{flex:'2', minWidth:'160px'}});
+      const addUmpBtn = el('button', {className:'btn btn-success btn-sm', style:{whiteSpace:'nowrap'}, onClick:()=>{
+          const id   = idInp.value.trim().toUpperCase();
+          const name = nmInp.value.trim();
+          if (!id||!name) { Toast.show('Enter both ID and name','error'); return; }
+          if (umpires.find(u=>u.id===id)) { Toast.show(`ID "${id}" already exists`,'error'); return; }
+          umpires.push({id, name, createdAt:Date.now()});
+          localStorage.setItem('REGISTERED_UMPIRES', JSON.stringify(umpires));
+          idInp.value=''; nmInp.value='';
+          Toast.show(`✅ ${name} (${id}) registered`);
+          window.Router.render();
+      }}, ['+ Register']);
+      addForm.appendChild(idInp); addForm.appendChild(nmInp); addForm.appendChild(addUmpBtn);
+      umpCard.appendChild(addForm);
+
+      /* Umpire list */
+      if (umpires.length) {
+          umpires.forEach((u,idx)=>{
+              const ur = el('div', {className:'setting-row'});
+              const info = el('div', {style:{flex:1,display:'flex',flexDirection:'column',gap:'2px'}});
+              info.appendChild(el('span',{style:{fontWeight:'700',color:'var(--text-primary)'}},[u.name]));
+              info.appendChild(el('span',{className:'text-xs mono',style:{color:'var(--accent-primary)'}},[`ID: ${u.id}`]));
+              ur.appendChild(info);
+              const rmBtn = el('button',{className:'btn btn-danger btn-sm',style:{padding:'4px 12px',fontSize:'0.78rem'}, onClick:()=>{
+                  umpires.splice(idx,1);
+                  localStorage.setItem('REGISTERED_UMPIRES',JSON.stringify(umpires));
+                  Toast.show(`${u.name} removed`);
+                  window.Router.render();
+              }},['✕ Remove']);
+              ur.appendChild(rmBtn);
+              umpCard.appendChild(ur);
+          });
+      } else {
+          umpCard.appendChild(el('div',{style:{textAlign:'center',padding:'20px',color:'var(--text-muted)',fontSize:'0.9rem',fontStyle:'italic',background:'rgba(0,0,0,0.1)',borderRadius:'var(--radius-sm)'}},[
+              'No umpires registered yet. Add one above.'
+          ]));
+      }
+      wrap.appendChild(umpCard);
+
+      /* ═══ 2. UMPIRE PERMISSIONS ══════════════════════════════ */
+      const permCard = section('👁️', 'Umpire Permissions', 'Control exactly what umpires can see and do. Fixture editing is always Master-only.');
+
+      const permDefs = [
+          { key:'canViewTeams',    label:'Teams & Players tab',           desc:'Show team roster and player names',               def:true  },
+          { key:'canViewSchedule', label:'Master Schedule tab',           desc:'Show fixture list with court & time',              def:true  },
+          { key:'canViewGroups',   label:'Group Stage tab',               desc:'Show standings tables and group match list',       def:true  },
+          { key:'canViewBracket',  label:'Knockout Bracket tab',          desc:'Show the elimination bracket',                    def:true  },
+          { key:'canViewStats',    label:'Player Stats tab',              desc:'Show match stats and win rates per player',        def:true  },
+          { key:'canViewLiveMatch',label:'Open Live Scoreboard',          desc:'Allow umpires to open the stadium display',        def:true  },
+          { key:'canStartMatch',   label:'Start & Score Matches',         desc:'Give umpires the full control panel (use with care)',def:false },
+      ];
+      permDefs.forEach(pd => permCard.appendChild(toggleRow(pd.label, pd.desc, pd.key, pd.def)));
+      wrap.appendChild(permCard);
+
+      /* ═══ 3. MASTER PIN ══════════════════════════════════════ */
+      const pinCard = section('🔐', 'Master Console PIN', 'Protect the Master Console with a PIN. Umpires and fans cannot access the console without it.');
+
+      const currentPin = localStorage.getItem('MASTER_PIN') || '';
+      const pinRow = el('div', {style:{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center'}});
+      const pinInp = el('input', {type:'password', placeholder:'Enter 4–8 digit PIN (blank = no PIN)', value:currentPin, style:{flex:'1',minWidth:'200px'}});
+
+      const setPinBtn = el('button', {className:'btn btn-warning btn-sm', onClick:()=>{
+          const pin = pinInp.value.trim();
+          if (pin && (pin.length<4||pin.length>8||!/^\d+$/.test(pin))) { Toast.show('PIN must be 4–8 digits only','error'); return; }
+          if (pin) { localStorage.setItem('MASTER_PIN',pin); Toast.show('🔐 Master PIN set'); }
+          else { localStorage.removeItem('MASTER_PIN'); Toast.show('PIN cleared — no protection'); pinInp.value=''; }
+      }}, ['Save PIN']);
+
+      const clearBtn = el('button', {className:'btn btn-ghost btn-sm', onClick:()=>{
+          localStorage.removeItem('MASTER_PIN'); pinInp.value='';
+          Toast.show('PIN cleared');
+      }}, ['Clear']);
+
+      pinRow.appendChild(pinInp); pinRow.appendChild(setPinBtn); pinRow.appendChild(clearBtn);
+      pinCard.appendChild(pinRow);
+      pinCard.appendChild(el('div',{className:'text-xs text-muted mt-sm'},['⚠️ Stored in browser localStorage. Clear browser data to reset.']));
+      wrap.appendChild(pinCard);
+
+      return wrap;
+  },
   _renderSchedule(t, isSpectator) {
       const wrap = el('div', { className: 'w-full' });
-      
+      const isMaster = !isSpectator;
+      const umpirePerms = this._getUmpirePermissions();
+      const canEditFixtures = isMaster; // Only master console can edit fixtures
+
+      // Collect all group names for dropdown
+      const groupNames = (t.groups || []).map(g => g.id);
+      const koRounds = (t.koMatches || []).map((r, i) => {
+          const len = t.koMatches.length;
+          if (i === len - 1) return 'Final';
+          if (i === len - 2) return 'Semi-Finals';
+          return `Round ${i + 1}`;
+      });
+
       let allMatches = [];
-      if (t.groups) t.groups.forEach(g => g.matches.forEach(m => allMatches.push(m)));
-      if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { if (!m.isBye) allMatches.push(m); }));
-      
+      if (t.groups) t.groups.forEach(g => g.matches.forEach(m => allMatches.push({...m, _groupId: g.id})));
+      if (t.koMatches) t.koMatches.forEach((r, ri) => r.forEach(m => { if (!m.isBye) allMatches.push({...m, _roundIndex: ri}); }));
       allMatches.sort((a,b) => a.matchNum - b.matchNum);
 
-      if (!isSpectator) {
+      if (canEditFixtures) {
           const headerActions = el('div', {className: 'flex justify-between items-center mb-md flex-wrap gap-sm no-print'});
-          headerActions.appendChild(el('div', {className: 'text-sm text-secondary font-medium'}, ['Edit teams via dropdowns or upload a custom CSV schedule.']));
+          headerActions.appendChild(el('div', {className: 'text-sm text-secondary font-medium'}, ['Edit teams, court, group & round via dropdowns. Upload CSV to bulk-update fixtures and group stage.']));
           
           const uploadLabel = el('label', { className: 'btn btn-ghost btn-sm', style: { cursor: 'pointer', margin: 0, fontWeight:'bold' } }, [
               Icons.upload, ' Upload CSV Schedule',
@@ -1951,6 +2803,11 @@ window.TournamentHub = {
 
           headerActions.appendChild(exportGroup);
           wrap.appendChild(headerActions);
+
+          // CSV format hint
+          const hint = el('div', {className:'no-print', style:{background:'rgba(79,195,247,0.08)', border:'1px solid rgba(79,195,247,0.25)', borderRadius:'var(--radius-sm)', padding:'10px 14px', marginBottom:'16px', fontSize:'0.8rem', color:'var(--text-secondary)'}});
+          hint.innerHTML = `<strong style="color:var(--accent-primary)">CSV Format:</strong> <code>Match No., Group/Round, Team A, Team B, Date &amp; Time, Court No., Status</code><br>Example: <code>1, Group A, Raptors, Eagles, 10:00 AM, 3, Scheduled</code> — Group Stage table updates automatically.`;
+          wrap.appendChild(hint);
       }
 
       if (allMatches.length === 0) {
@@ -1959,14 +2816,97 @@ window.TournamentHub = {
       }
 
       const containerCard = el('div', { className: 'card', style: { padding: '24px' } });
-      const grid = el('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' } });
+      const grid = el('div', { id:'schedule-grid', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' } });
 
       allMatches.forEach(m => {
           const mSel = el('div', { className: 'match-selector', style: {height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)'} });
           
-          const headerBlock = el('div', {style:{background:'rgba(0,0,0,0.3)', padding:'8px 12px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--border-color)'}});
-          headerBlock.appendChild(el('span', {style:{color:'var(--accent-primary)', fontSize:'0.75rem', fontWeight:'bold', textTransform:'uppercase'}} , [m.stage]));
-          headerBlock.appendChild(el('span', {style:{color:'var(--text-muted)', fontSize:'0.75rem', fontWeight:'bold'}}, [`M${m.matchNum}`]));
+          // ─── FIXTURE HEADER BLOCK ───
+          const headerBlock = el('div', {style:{background:'rgba(0,0,0,0.3)', padding:'8px 12px', borderBottom:'1px solid var(--border-color)'}});
+
+          if (canEditFixtures) {
+              // Row 1: Stage dropdown + Match# badge
+              const row1 = el('div', {style:{display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px'}});
+              
+              const stageSelect = el('select', {
+                  style:{flex:1, padding:'4px 8px', fontSize:'0.75rem', fontWeight:'bold', background:'rgba(0,0,0,0.4)', color:'var(--accent-primary)', border:'1px solid rgba(79,195,247,0.3)', borderRadius:'4px'},
+                  onChange: (e) => {
+                      const match = TournamentManager._findMatch(m.id);
+                      if (match) { match.stage = e.target.value; TournamentManager.save(); if(window.FBM.user){const fm={...match};delete fm.teamA;delete fm.teamB;window.FBM.saveMatchMeta(fm);} window.Router.render(); }
+                  }
+              });
+              // Group stages — with Round sub-options
+              if (groupNames.length) {
+                  const grpGroup = el('optgroup', {label: 'Group Stage'});
+                  groupNames.forEach(gId => {
+                      [1,2,3].forEach(rnd => {
+                          const val = `Group ${gId} (Round ${rnd})`;
+                          grpGroup.appendChild(el('option', {value: val, ...(m.stage === val ? {selected:''} : {})}, [val]));
+                      });
+                  });
+                  stageSelect.appendChild(grpGroup);
+              }
+              // KO rounds
+              if (koRounds.length) {
+                  const koGroup = el('optgroup', {label: 'Knockout'});
+                  koRounds.forEach(rName => { koGroup.appendChild(el('option', {value: rName, ...(m.stage === rName ? {selected:''} : {})}, [rName])); });
+                  stageSelect.appendChild(koGroup);
+              }
+              row1.appendChild(el('span', {style:{fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:'bold', whiteSpace:'nowrap'}}, ['Stage:']));
+              row1.appendChild(stageSelect);
+              row1.appendChild(el('span', {style:{color:'var(--text-muted)', fontSize:'0.75rem', fontWeight:'bold', whiteSpace:'nowrap'}}, [`M#${m.matchNum}`]));
+              headerBlock.appendChild(row1);
+
+              // Row 2: Court # + Round # dropdowns
+              const row2 = el('div', {style:{display:'flex', alignItems:'center', gap:'8px'}});
+
+              // Court number dropdown
+              const courtSelect = el('select', {
+                  style:{flex:1, padding:'4px 8px', fontSize:'0.75rem', background:'rgba(0,0,0,0.4)', color:'#fff', border:'1px solid var(--border-color)', borderRadius:'4px'},
+                  onChange: (e) => {
+                      const match = TournamentManager._findMatch(m.id);
+                      if (match) { match.court = e.target.value; TournamentManager.save(); if(window.FBM.user){const fm={...match};delete fm.teamA;delete fm.teamB;window.FBM.saveMatchMeta(fm);} window.Router.render(); }
+                  }
+              });
+              courtSelect.appendChild(el('option', {value:''}, ['Court —']));
+              for (let c = 1; c <= 12; c++) courtSelect.appendChild(el('option', {value: String(c), ...((m.court === String(c)) ? {selected:''} : {})}, [`Court ${c}`]));
+              
+              // Match number editable input
+              const matchNumInput = el('input', {
+                  type: 'number', min: '1', value: String(m.matchNum),
+                  style:{flex:1, padding:'4px 8px', fontSize:'0.75rem', background:'rgba(0,0,0,0.4)', color:'#fff', border:'1px solid var(--border-color)', borderRadius:'4px', textAlign:'center'},
+                  onChange: (e) => {
+                      const val = parseInt(e.target.value);
+                      if (!val || val < 1) return;
+                      const match = TournamentManager._findMatch(m.id);
+                      if (match) { match.matchNum = val; TournamentManager.save(); if(window.FBM.user){const fm={...match};delete fm.teamA;delete fm.teamB;window.FBM.saveMatchMeta(fm);} window.Router.render(); }
+                  }
+              });
+
+              row2.appendChild(el('span', {style:{fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:'bold', whiteSpace:'nowrap'}}, ['Court:']));
+              row2.appendChild(courtSelect);
+              row2.appendChild(el('span', {style:{fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:'bold', whiteSpace:'nowrap'}}, ['M#:']));
+              row2.appendChild(matchNumInput);
+              headerBlock.appendChild(row2);
+
+              // Row 3: Scheduled time (if set)
+              if (m.scheduledTime) {
+                  const timeRow = el('div', {style:{marginTop:'4px', fontSize:'0.72rem', color:'var(--accent-warning)', fontWeight:'bold'}});
+                  timeRow.textContent = `⏰ ${m.scheduledTime}`;
+                  headerBlock.appendChild(timeRow);
+              }
+          } else {
+              // Spectator / umpire read-only header
+              const readRow = el('div', {style:{display:'flex', justifyContent:'space-between', alignItems:'center'}});
+              readRow.appendChild(el('span', {style:{color:'var(--accent-primary)', fontSize:'0.75rem', fontWeight:'bold', textTransform:'uppercase'}}, [m.stage || '']));
+              const rightInfo = el('div', {style:{display:'flex', gap:'8px', alignItems:'center'}});
+              if (m.court) rightInfo.appendChild(el('span', {style:{background:'rgba(255,202,40,0.15)', color:'var(--accent-warning)', fontSize:'0.7rem', fontWeight:'bold', padding:'2px 7px', borderRadius:'4px'}}, [`Court ${m.court}`]));
+              rightInfo.appendChild(el('span', {style:{color:'var(--text-muted)', fontSize:'0.75rem', fontWeight:'bold'}}, [`M${m.matchNum}`]));
+              readRow.appendChild(rightInfo);
+              headerBlock.appendChild(readRow);
+              if (m.scheduledTime) headerBlock.appendChild(el('div', {style:{fontSize:'0.7rem', color:'var(--accent-warning)', marginTop:'3px', fontWeight:'bold'}}, [`⏰ ${m.scheduledTime}`]));
+          }
+
           mSel.appendChild(headerBlock);
 
           const teamWrap = el('div', { style: {flex: 1} });
@@ -1976,7 +2916,7 @@ window.TournamentHub = {
               const teamObj = t.teams.find(tm => tm.id === teamId);
               const div = el('div', { className: 'match-team' + (isWin ? ' winner' : ''), style: {padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'} });
               
-              if (!isSpectator && m.status === 'pending') {
+              if (canEditFixtures && m.status === 'pending') {
                   const sel = el('select', { 
                       className: 'team-dropdown no-print',
                       onChange: (e) => TournamentManager.updateMatchTeam(m.id, slotKey, e.target.value)
@@ -1987,7 +2927,6 @@ window.TournamentHub = {
                   });
                   div.appendChild(sel);
                   
-                  // ADDED: Print-only text element so team names show up on PDF for pending matches
                   const fallbackLabel = slotKey === 'teamAId' ? m.labelA : m.labelB;
                   const printName = teamObj ? escapeHTML(teamObj.name) : (fallbackLabel || 'TBD');
                   const printLabel = el('span', { className: 'print-only', style: { fontSize: '1rem', fontWeight: '700' } }, [printName]);
@@ -2018,9 +2957,11 @@ window.TournamentHub = {
           const actionsRow = el('div', { className: 'no-print', style: { padding: '12px 16px', textAlign: 'center', background: 'rgba(0,0,0,0.3)', marginTop: 'auto', borderTop:'1px solid var(--border-color)' } });
 
           if (isSpectator) {
+              // Check umpire permissions for viewing
+              const canViewLive = umpirePerms.canViewLiveMatch;
               if (m.status === 'completed') {
                   actionsRow.appendChild(el('span', {className:'text-xs', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['MATCH COMPLETED ✓']));
-              } else if (m.status === 'live') {
+              } else if (m.status === 'live' && canViewLive) {
                   actionsRow.appendChild(el('button', { className: 'btn btn-primary btn-sm w-full', style: {fontSize: '0.85rem', padding: '8px 12px'}, onClick: () => DisplayManager.launchScoreboard(m.id) }, ['📺 View Live Match']));
               } else {
                   actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['UPCOMING']));
@@ -2077,7 +3018,12 @@ window.TournamentHub = {
           
           const tableWrap = el('div', { className: 'table-wrap', style: {borderBottom: 'none'} });
           const table = el('table', { className: 'groups-table' });
-          table.appendChild(el('thead', {}, [el('tr', {}, [el('th',{},['#']), el('th',{},['Team']), el('th',{},['P']), el('th',{},['W'])])]));
+          table.appendChild(el('thead', {}, [el('tr', {}, [
+              el('th',{style:{width:'32px',textAlign:'center'}},['#']),
+              el('th',{},['Team']),
+              el('th',{style:{textAlign:'center'},title:'Matches Played'},['Played']),
+              el('th',{style:{textAlign:'center', color:'var(--accent-primary)'},title:'Matches Won'},['Won'])
+          ])]));
           const tbody = el('tbody');
           g.teams.forEach((tm, i) => {
               const tr = el('tr', { className: i < t.advanceCount ? 'advancing-row' : '' });
@@ -2112,45 +3058,77 @@ window.TournamentHub = {
               }
               tr.appendChild(teamTd);
 
-              tr.appendChild(el('td', { className: 'text-muted font-bold' }, [String(tm.played)]));
-              tr.appendChild(el('td', { style: {fontWeight: '900', color: 'var(--accent-primary)', fontSize:'1.1rem'} }, [String(tm.wins)]));
+              tr.appendChild(el('td', { style: {textAlign:'center', color:'var(--text-muted)', fontWeight:'700'} }, [String(tm.played)]));
+              tr.appendChild(el('td', { style: {textAlign:'center', fontWeight:'900', color:'var(--accent-success)', fontSize:'1.05rem'} }, [String(tm.wins)]));
               tbody.appendChild(tr);
           });
           table.appendChild(tbody); tableWrap.appendChild(table); card.appendChild(tableWrap);
           
-          // Match List for this specific group
+          // Match List for this specific group — enhanced with M#, time, court
           const matchesDiv = el('div', { className: 'match-list', style: {borderTop:'1px solid var(--border-color)', padding: '16px'} });
-          matchesDiv.appendChild(el('div', {style:{fontSize:'0.85rem', fontWeight:'bold', textTransform:'uppercase', color:'var(--text-secondary)', marginBottom:'16px', textAlign:'center', letterSpacing:'1px'}}, ['Group Matches']));
+          matchesDiv.appendChild(el('div', {style:{fontSize:'0.85rem', fontWeight:'bold', textTransform:'uppercase', color:'var(--text-secondary)', marginBottom:'12px', textAlign:'center', letterSpacing:'1px'}}, [`Group ${g.id} — Matches`]));
 
+          // Group by round
+          const rounds = {};
           g.matches.forEach(m => {
-              const mSel = el('div', { className: 'match-selector', style: {marginBottom: '8px'} });
-              const makeTeamRow = (teamObj) => {
-                  const isWin = m.winnerId && teamObj && m.winnerId === teamObj.id;
-                  const div = el('div', { className: 'match-team' + (isWin ? ' winner' : ''), style: {padding: '8px 12px'} });
-                  
-                  let nameSpan = '';
-                  if(teamObj) {
-                      nameSpan = `<a style="font-weight:700; cursor:pointer;" onclick="window.showTeamStats('${teamObj.id}')">${escapeHTML(teamObj.name)}</a>`;
-                  } else {
-                      nameSpan = `<span style="font-weight:700; color:var(--text-muted);">TBD</span>`;
-                  }
-                  
-                  div.innerHTML = `<span style="font-size:1rem;">${nameSpan}</span>`;
-                  if (isWin) {
-                      div.appendChild(el('span', {style:{fontSize:'1.2rem'}}, ['🏆']));
-                      if (!isSpectator) {
-                          const undoBtn = el('button', { className: 'btn btn-ghost btn-sm no-print', style: {padding: '4px 10px', fontSize: '0.75rem', marginLeft: '10px'}, onClick: (e) => { e.stopPropagation(); TournamentManager.clearMatchResult(m.id); } }, ['↩️ Undo']);
-                          div.appendChild(undoBtn);
+              const rNum = m.roundNum || (m.stage && m.stage.match(/Round\s*(\d+)/i) ? parseInt(m.stage.match(/Round\s*(\d+)/i)[1]) : 1);
+              if (!rounds[rNum]) rounds[rNum] = [];
+              rounds[rNum].push(m);
+          });
+
+          Object.keys(rounds).sort((a,b)=>a-b).forEach(rNum => {
+              const rHeader = el('div', {style:{fontSize:'0.72rem', fontWeight:'700', textTransform:'uppercase', color:'var(--accent-primary)', letterSpacing:'1px', marginBottom:'6px', marginTop: rNum > 1 ? '12px' : '0'}}, [`Round ${rNum}`]);
+              matchesDiv.appendChild(rHeader);
+
+              rounds[rNum].forEach(m => {
+                  const mSel = el('div', { className: 'match-selector', style: {marginBottom: '8px'} });
+
+                  // Mini header: M# + court + time
+                  const mHdr = el('div', {style:{background:'rgba(0,0,0,0.3)', padding:'4px 10px', display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'0.7rem', borderBottom:'1px solid var(--border-color)'}});
+                  const leftInfo = el('div', {style:{display:'flex', gap:'8px', alignItems:'center'}});
+                  leftInfo.appendChild(el('span', {style:{color:'var(--text-muted)', fontWeight:'bold'}}, [`M${m.matchNum}`]));
+                  if (m.court) leftInfo.appendChild(el('span', {style:{background:'rgba(255,202,40,0.15)', color:'var(--accent-warning)', padding:'1px 6px', borderRadius:'3px', fontWeight:'bold'}}, [`Court ${m.court}`]));
+                  mHdr.appendChild(leftInfo);
+                  if (m.scheduledTime) mHdr.appendChild(el('span', {style:{color:'var(--accent-warning)', fontWeight:'bold'}}, [`⏰ ${m.scheduledTime}`]));
+                  mSel.appendChild(mHdr);
+
+                  const makeTeamRow = (teamObj) => {
+                      const isWin = m.winnerId && teamObj && m.winnerId === teamObj.id;
+                      const div = el('div', { className: 'match-team' + (isWin ? ' winner' : ''), style: {padding: '8px 12px', display:'flex', justifyContent:'space-between', alignItems:'center'} });
+                      let nameSpan = '';
+                      if(teamObj) {
+                          nameSpan = `<a style="font-weight:700; cursor:pointer;" onclick="window.showTeamStats('${teamObj.id}')">${escapeHTML(teamObj.name)}</a>`;
+                      } else {
+                          nameSpan = `<span style="font-weight:700; color:var(--text-muted);">TBD</span>`;
                       }
-                  } else if (!isSpectator && m.status === 'pending' && teamObj) {
-                      const winBtn = el('button', { className: 'btn btn-ghost btn-sm no-print', style: {padding: '4px 10px', fontSize: '0.75rem', color: 'var(--accent-success)', fontWeight:'bold'}, onClick: () => TournamentManager.simulateWin(m.id, teamObj.id) }, ['Win']);
-                      div.appendChild(winBtn);
+                      div.innerHTML = `<span style="font-size:0.95rem;">${nameSpan}</span>`;
+                      if (isWin) {
+                          div.appendChild(el('span', {style:{fontSize:'1.1rem'}}, ['🏆']));
+                          if (!isSpectator) {
+                              const undoBtn = el('button', { className: 'btn btn-ghost btn-sm no-print', style: {padding: '3px 8px', fontSize: '0.7rem', marginLeft: '8px'}, onClick: (e) => { e.stopPropagation(); TournamentManager.clearMatchResult(m.id); } }, ['↩️']);
+                              div.appendChild(undoBtn);
+                          }
+                      } else if (!isSpectator && m.status === 'pending' && teamObj) {
+                          const winBtn = el('button', { className: 'btn btn-ghost btn-sm no-print', style: {padding: '3px 8px', fontSize: '0.7rem', color: 'var(--accent-success)', fontWeight:'bold'}, onClick: () => TournamentManager.simulateWin(m.id, teamObj.id) }, ['Win']);
+                          div.appendChild(winBtn);
+                      }
+                      return div;
+                  };
+                  mSel.appendChild(makeTeamRow(m.teamA));
+                  mSel.appendChild(makeTeamRow(m.teamB));
+
+                  // Action row
+                  if (!isSpectator && m.status === 'pending' && m.teamAId && m.teamBId) {
+                      const actRow = el('div', {style:{padding:'6px 10px', textAlign:'center', background:'rgba(0,0,0,0.2)', borderTop:'1px solid var(--border-color)'}});
+                      actRow.appendChild(el('button', {className:'btn btn-primary btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, ['▶ Start Match']));
+                      mSel.appendChild(actRow);
+                  } else if (m.status === 'live') {
+                      const actRow = el('div', {style:{padding:'6px 10px', textAlign:'center', background:'rgba(0,0,0,0.2)', borderTop:'1px solid var(--border-color)'}});
+                      actRow.appendChild(el('button', {className:'btn btn-warning btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto', fontWeight:'bold'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, ['🔴 Resume Live']));
+                      mSel.appendChild(actRow);
                   }
-                  return div;
-              };
-              mSel.appendChild(makeTeamRow(m.teamA));
-              mSel.appendChild(makeTeamRow(m.teamB));
-              matchesDiv.appendChild(mSel);
+                  matchesDiv.appendChild(mSel);
+              });
           });
 
           card.appendChild(matchesDiv);
@@ -2972,7 +3950,12 @@ window.TournamentExport = {
             card.appendChild(el('div', { className: 'group-header' }, [ el('span', {}, [`Group ${g.id}`]), el('span', { className: 'text-xs' }, [`Top ${t.advanceCount} Adv`]) ]));
             const tableWrap = el('div', { className: 'table-wrap' });
             const table = el('table', { className: 'groups-table' });
-            table.appendChild(el('thead', {}, [el('tr', {}, [el('th',{},['#']), el('th',{},['Team']), el('th',{},['P']), el('th',{},['W'])])]));
+            table.appendChild(el('thead', {}, [el('tr', {}, [
+                el('th',{},['#']),
+                el('th',{},['Team']),
+                el('th',{style:{textAlign:'center'}},['Played']),
+                el('th',{style:{textAlign:'center'}},['Won'])
+            ])]));
             const tbody = el('tbody');
             g.teams.forEach((tm, i) => {
                 const tr = el('tr', { className: i < t.advanceCount ? 'advancing-row' : '' });
@@ -3180,7 +4163,287 @@ window.TournamentExport = {
   }
 };
 
-/* ─── APP INITIALIZATION ───────────────────────────────────────────── */
+/* ─── GGS TOURNAMENT STATIC DATA ──────────────────────────────────── */
+window.GGS_DATA = {
+  name: 'GGS Badminton Tournament 2026',
+  teams: [
+    { name: 'Net Ninjas - I',                    p1: 'Balaji Perumal',           p2: 'Masada Gowtham Swamy Naidu' },
+    { name: 'Net Ninjas - II',                   p1: 'Shiva Vineeth S',          p2: 'Kosalai K' },
+    { name: 'Out Of Office',                     p1: 'Pratheep Ramanathan',      p2: 'Shanthosh Segar' },
+    { name: 'OD',                                p1: 'Navaneetha Krishnan',      p2: 'Chris Philip' },
+    { name: 'Lucky Shorts Payaluga',             p1: 'Saravanababu S',           p2: 'Naresh Kumar Gunasekaran' },
+    { name: 'Smashers',                          p1: 'Niranjan Veluru',          p2: 'Saripilli Balaji' },
+    { name: 'Flight Control',                    p1: 'Babu Arumugam',            p2: 'Abinesh Kumaresan' },
+    { name: 'Game Changer',                      p1: 'Nithish R',                p2: 'Saraboji M' },
+    { name: 'Patta Bakiyam Padalana Legyam',     p1: 'Praveen Kumar S',          p2: 'Surendharavel G. T' },
+    { name: 'Smash Bros',                        p1: 'Nabil Nasrullah S',        p2: 'Shyam Aravind' },
+    { name: 'Court Ke Khiladies',               p1: 'Vamsi Gohul V',            p2: 'Hemnag Ramesh' },
+    { name: 'Akhanda Rockers',                   p1: 'S Hari Srinivas',          p2: 'Shiju Abraham' },
+    { name: 'Akatsuki',                          p1: 'Vigneshwaran Prabagaran',  p2: 'Vasanth Logusundar' },
+    { name: 'Elite Shuttlers',                   p1: 'Vasanth Veeraragavan',     p2: 'Ajay Rajalingam' },
+    { name: 'Attack On Titans',                  p1: 'Yogamanikandan Murugesan', p2: 'Suriyaprasath R' },
+    { name: 'Team Yellow Flash',                 p1: 'Tarigonda Shaik Afan',     p2: 'Lohith Jayakanthan' },
+    { name: 'Morpheus Monks',                    p1: 'Rajesh Baskaran',          p2: 'Kamalesh Navaneethan' },
+    { name: 'Racquet Scientists',                p1: 'Surya T V',                p2: 'Matthew Samson' },
+    { name: 'ஏன்தான் விளையாடுறோமோ',             p1: 'Karthick Shanmugam',       p2: 'Keerthiharan T' },
+    { name: 'KK Fire',                           p1: 'Kumaresan',                p2: 'Kaneeshkumar' },
+    { name: 'Thunder Shuttlers',                 p1: 'Srinivasan Kannan',        p2: 'Kannan Gopi Perumalsamy' },
+    { name: 'Magilchi',                          p1: 'Ganesh Kumar',             p2: 'Nikesh' },
+    { name: 'Yedhukkuu !',                       p1: 'Murali Sanjay',            p2: 'Kishore' },
+    { name: 'Smash Masters',                     p1: 'Vimal Raj Prabu',          p2: 'Gurumoorthy Kuberan' },
+    { name: 'Rising Stars',                      p1: 'Harikrishnan R',           p2: 'Thirumalairajan D' },
+    { name: 'Siragadikka Aasai',                 p1: 'Santhosh S',               p2: 'Abhishek Kumar Singh' },
+    { name: 'Team 555',                          p1: 'Rahul Selvakumaran',       p2: 'Vengadesh Angamuthu' },
+    { name: 'Nangathan',                         p1: 'Ajith K',                  p2: 'Vinoth V' },
+    { name: 'Smash Partners',                    p1: 'Suresh Tharmalingam',      p2: 'Naveen Siranjeevi' },
+    { name: 'SS Team',                           p1: 'Sivaperumal H',            p2: 'Siddharth Ganapathy' },
+    { name: 'Red Devils',                        p1: 'Kishore Baskar',           p2: 'Mithun Ravichandran' },
+    { name: 'Enzo',                              p1: 'Ajay R',                   p2: 'Kabilan G' },
+  ],
+  groups: {
+    A: ['KK Fire', 'Smash Partners', 'Nangathan', 'Smashers'],
+    B: ['Court Ke Khiladies', 'Net Ninjas - II', 'Red Devils', 'Flight Control'],
+    C: ['Out Of Office', 'Smash Bros', 'Net Ninjas - I', 'Smash Masters'],
+    D: ['Team 555', 'Patta Bakiyam Padalana Legyam', 'OD', 'Morpheus Monks'],
+    E: ['Akhanda Rockers', 'Racquet Scientists', 'Game Changer', 'Elite Shuttlers'],
+    F: ['Siragadikka Aasai', 'Attack On Titans', 'Yedhukkuu !', 'Magilchi'],
+    G: ['Enzo', 'ஏன்தான் விளையாடுறோமோ', 'Thunder Shuttlers', 'Team Yellow Flash'],
+    H: ['Lucky Shorts Payaluga', 'Rising Stars', 'SS Team', 'Akatsuki'],
+  },
+  fixtures: [
+    [1,'Group A (Round 1)','KK Fire','Nangathan','10:00 am ; 09-05-2026',1],
+    [2,'Group A (Round 1)','Smashers','Smash Partners','10:20 am ; 09-05-2026',1],
+    [3,'Group A (Round 2)','KK Fire','Smash Partners','10:40 am ; 09-05-2026',1],
+    [4,'Group A (Round 2)','Nangathan','Smashers','11:00 am ; 09-05-2026',1],
+    [5,'Group A (Round 3)','KK Fire','Smashers','11:20 am ; 09-05-2026',1],
+    [6,'Group A (Round 3)','Smash Partners','Nangathan','11:40 am ; 09-05-2026',1],
+    [7,'Group B (Round 1)','Court Ke Khiladies','Flight Control','10:00 am ; 09-05-2026',2],
+    [8,'Group B (Round 1)','Net Ninjas - II','Red Devils','10:20 am ; 09-05-2026',2],
+    [9,'Group B (Round 2)','Court Ke Khiladies','Red Devils','10:40 am ; 09-05-2026',2],
+    [10,'Group B (Round 2)','Flight Control','Net Ninjas - II','11:00 am ; 09-05-2026',2],
+    [11,'Group B (Round 3)','Court Ke Khiladies','Net Ninjas - II','11:20 am ; 09-05-2026',2],
+    [12,'Group B (Round 3)','Red Devils','Flight Control','11:40 am ; 09-05-2026',2],
+    [13,'Group C (Round 1)','Smash Bros','Smash Masters','10:00 am ; 09-05-2026',3],
+    [14,'Group C (Round 1)','Out Of Office','Net Ninjas - I','10:20 am ; 09-05-2026',3],
+    [15,'Group C (Round 2)','Smash Bros','Net Ninjas - I','10:40 am ; 09-05-2026',3],
+    [16,'Group C (Round 2)','Smash Masters','Out Of Office','11:00 am ; 09-05-2026',3],
+    [17,'Group C (Round 3)','Smash Bros','Out Of Office','11:20 am ; 09-05-2026',3],
+    [18,'Group C (Round 3)','Net Ninjas - I','Smash Masters','11:40 am ; 09-05-2026',3],
+    [19,'Group D (Round 1)','Team 555','OD','12:00 pm ; 09-05-2026',1],
+    [20,'Group D (Round 1)','Patta Bakiyam Padalana Legyam','Morpheus Monks','12:20 pm ; 09-05-2026',1],
+    [21,'Group D (Round 2)','Team 555','Morpheus Monks','12:40 pm ; 09-05-2026',1],
+    [22,'Group D (Round 2)','OD','Patta Bakiyam Padalana Legyam','01:00 pm ; 09-05-2026',1],
+    [23,'Group D (Round 3)','Team 555','Patta Bakiyam Padalana Legyam','01:20 pm ; 09-05-2026',1],
+    [24,'Group D (Round 3)','Morpheus Monks','OD','01:40 pm ; 09-05-2026',1],
+    [25,'Group E (Round 1)','Akhanda Rockers','Racquet Scientists','12:00 pm ; 09-05-2026',2],
+    [26,'Group E (Round 1)','Game Changer','Elite Shuttlers','12:20 pm ; 09-05-2026',2],
+    [27,'Group E (Round 2)','Akhanda Rockers','Elite Shuttlers','12:40 pm ; 09-05-2026',2],
+    [28,'Group E (Round 2)','Racquet Scientists','Game Changer','01:00 pm ; 09-05-2026',2],
+    [29,'Group E (Round 3)','Akhanda Rockers','Game Changer','01:20 pm ; 09-05-2026',2],
+    [30,'Group E (Round 3)','Elite Shuttlers','Racquet Scientists','01:40 pm ; 09-05-2026',2],
+    [31,'Group F (Round 1)','Attack On Titans','Magilchi','12:00 pm ; 09-05-2026',3],
+    [32,'Group F (Round 1)','Siragadikka Aasai','Yedhukkuu !','12:20 pm ; 09-05-2026',3],
+    [33,'Group F (Round 2)','Attack On Titans','Yedhukkuu !','12:40 pm ; 09-05-2026',3],
+    [34,'Group F (Round 2)','Magilchi','Siragadikka Aasai','01:00 pm ; 09-05-2026',3],
+    [35,'Group F (Round 3)','Attack On Titans','Siragadikka Aasai','01:20 pm ; 09-05-2026',3],
+    [36,'Group F (Round 3)','Yedhukkuu !','Magilchi','01:40 pm ; 09-05-2026',3],
+    [37,'Group G (Round 1)','Enzo','Team Yellow Flash','02:40 pm ; 09-05-2026',1],
+    [38,'Group G (Round 1)','ஏன்தான் விளையாடுறோமோ','Thunder Shuttlers','02:40 pm ; 09-05-2026',3],
+    [39,'Group G (Round 2)','Enzo','Thunder Shuttlers','03:00 pm ; 09-05-2026',1],
+    [40,'Group G (Round 2)','Team Yellow Flash','ஏன்தான் விளையாடுறோமோ','03:00 pm ; 09-05-2026',3],
+    [41,'Group G (Round 3)','Enzo','ஏன்தான் விளையாடுறோமோ','03:20 pm ; 09-05-2026',1],
+    [42,'Group G (Round 3)','Thunder Shuttlers','Team Yellow Flash','03:40 pm ; 09-05-2026',1],
+    [43,'Group H (Round 1)','SS Team','Akatsuki','02:40 pm ; 09-05-2026',2],
+    [44,'Group H (Round 1)','Rising Stars','Lucky Shorts Payaluga','03:00 pm ; 09-05-2026',2],
+    [45,'Group H (Round 2)','SS Team','Lucky Shorts Payaluga','03:20 pm ; 09-05-2026',1],
+    [46,'Group H (Round 2)','Akatsuki','Rising Stars','03:20 pm ; 09-05-2026',3],
+    [47,'Group H (Round 3)','SS Team','Rising Stars','03:40 pm ; 09-05-2026',2],
+    [48,'Group H (Round 3)','Lucky Shorts Payaluga','Akatsuki','03:40 pm ; 09-05-2026',3],
+  ]
+};
+
+/* ─── UNIVERSAL CSV→TOURNAMENT BUILDER ─────────────────────────────── */
+/* Parses any fixture CSV (or GGS_DATA) and fully builds tournament state:
+   teams, groups, matches, court, time, round — no pre-existing tourney needed */
+window.buildTournamentFromFixtures = function(fixtureRows, teamRosterMap, tourneyName) {
+    // fixtureRows: [{matchNum, stage, teamA, teamB, time, court}, ...]
+    // teamRosterMap: { 'Team Name': {p1, p2} } — optional player names
+    // Returns {meta, teams, matches}
+
+    const tourneyId = Math.random().toString(36).slice(2, 8).toUpperCase();
+    const teamRegistry = {}; // name → team object
+
+    const getOrCreateTeam = (name) => {
+        const key = name.trim();
+        if (!key) return null;
+        if (!teamRegistry[key]) {
+            const roster = teamRosterMap && teamRosterMap[key];
+            teamRegistry[key] = {
+                id: uid(),
+                name: key,
+                tournamentId: tourneyId,
+                players: roster
+                    ? [{ id: uid(), name: roster.p1 }, { id: uid(), name: roster.p2 }]
+                    : [{ id: uid(), name: `${key} P1` }, { id: uid(), name: `${key} P2` }],
+            };
+        }
+        return teamRegistry[key];
+    };
+
+    // Parse stage: "Group A (Round 1)" → { groupId: 'A', roundNum: 1, type: 'group' }
+    //              "Semi-Finals" / "Final" / "Round 1" → { type: 'ko', roundIndex: N }
+    const parseStage = (stage) => {
+        const grpMatch = stage.match(/Group\s+([A-Z])\s*\(Round\s*(\d+)\)/i);
+        if (grpMatch) return { type: 'group', groupId: grpMatch[1].toUpperCase(), roundNum: parseInt(grpMatch[2]) };
+        const grpOnly = stage.match(/Group\s+([A-Z])/i);
+        if (grpOnly) return { type: 'group', groupId: grpOnly[1].toUpperCase(), roundNum: 1 };
+        // KO round name → index
+        const koNames = ['Round 1','Round 2','Round 3','Round 4','Quarter-Finals','Semi-Finals','Final','3rd Place'];
+        let ri = koNames.findIndex(n => stage.toLowerCase().includes(n.toLowerCase()));
+        if (ri === -1) ri = 0;
+        return { type: 'ko', roundIndex: ri };
+    };
+
+    // Build group membership from fixtures (which teams appear in which group)
+    const groupTeams = {}; // groupId → Set of team names
+
+    fixtureRows.forEach(row => {
+        const info = parseStage(row.stage);
+        if (info.type === 'group') {
+            if (!groupTeams[info.groupId]) groupTeams[info.groupId] = new Set();
+            if (row.teamA) groupTeams[info.groupId].add(row.teamA.trim());
+            if (row.teamB) groupTeams[info.groupId].add(row.teamB.trim());
+        }
+    });
+
+    // Assign groupId to each team
+    Object.entries(groupTeams).forEach(([gId, names]) => {
+        names.forEach(name => {
+            const t = getOrCreateTeam(name);
+            if (t) t.groupId = gId;
+        });
+    });
+
+    // Pre-create teams that appear in fixtures but not yet in registry
+    fixtureRows.forEach(row => {
+        if (row.teamA) getOrCreateTeam(row.teamA);
+        if (row.teamB) getOrCreateTeam(row.teamB);
+    });
+
+    const teams = Object.values(teamRegistry);
+    const teamByName = (n) => n ? teams.find(t => t.name.toLowerCase() === n.trim().toLowerCase()) : null;
+
+    // Build matches
+    const matches = [];
+    const groupIds = Object.keys(groupTeams).sort();
+    const numGroups = groupIds.length;
+    const advanceCount = 2; // default 2 per group advance
+
+    // KO round index tracking
+    const koRoundNames = ['Round 1','Round 2','Round 3','Round 4','Quarter-Finals','Semi-Finals','Final','3rd Place'];
+    const koRoundIndex = {};
+
+    fixtureRows.forEach(row => {
+        const info = parseStage(row.stage);
+        const tA = teamByName(row.teamA);
+        const tB = teamByName(row.teamB);
+
+        if (info.type === 'group') {
+            matches.push({
+                id: `M_${row.matchNum}_${uid().slice(0,4)}`,
+                tournamentId: tourneyId,
+                type: 'group',
+                groupId: info.groupId,
+                stage: row.stage,
+                roundNum: info.roundNum,
+                teamAId: tA ? tA.id : null,
+                teamBId: tB ? tB.id : null,
+                labelA: row.teamA || 'TBD',
+                labelB: row.teamB || 'TBD',
+                status: 'pending', scoreA: 0, scoreB: 0, winnerId: null,
+                matchNum: row.matchNum,
+                scheduledTime: row.time || '',
+                court: row.court ? String(row.court) : '',
+            });
+        } else {
+            const stageLower = row.stage.toLowerCase();
+            let ri = 0;
+            if (stageLower.includes('final') && !stageLower.includes('semi') && !stageLower.includes('quarter')) ri = 99;
+            else if (stageLower.includes('semi')) ri = 98;
+            else if (stageLower.includes('quarter')) ri = 97;
+            else if (stageLower.includes('3rd') || stageLower.includes('third')) ri = 96;
+            else {
+                const rn = row.stage.match(/Round\s*(\d+)/i);
+                ri = rn ? (parseInt(rn[1]) - 1) : 0;
+            }
+            // Normalise so Final=last; we'll fix order after
+            if (!koRoundIndex[ri]) koRoundIndex[ri] = [];
+            const mi = koRoundIndex[ri].length;
+            koRoundIndex[ri].push(row.matchNum);
+            matches.push({
+                id: `KO_${row.matchNum}_${uid().slice(0,4)}`,
+                tournamentId: tourneyId,
+                type: 'ko',
+                roundIndex: ri,
+                matchIndex: mi,
+                stage: row.stage,
+                teamAId: tA ? tA.id : null,
+                teamBId: tB ? tB.id : null,
+                labelA: row.teamA || 'TBD',
+                labelB: row.teamB || 'TBD',
+                status: 'pending', scoreA: 0, scoreB: 0, winnerId: null,
+                matchNum: row.matchNum,
+                scheduledTime: row.time || '',
+                court: row.court ? String(row.court) : '',
+            });
+        }
+    });
+
+    // Remap KO round indices to contiguous 0..N
+    const koKeys = Object.keys(koRoundIndex).map(Number).sort((a,b)=>a-b);
+    const koRemap = {}; koKeys.forEach((k, i) => koRemap[k] = i);
+    matches.filter(m => m.type === 'ko').forEach(m => { m.roundIndex = koRemap[m.roundIndex] ?? m.roundIndex; });
+
+    const meta = {
+        id: tourneyId,
+        name: tourneyName || 'Imported Tournament',
+        format: numGroups > 0 ? 'groups' : 'knockout',
+        phase: numGroups > 0 ? 'rr' : 'ko',
+        numGroups: numGroups,
+        advanceCount: advanceCount,
+        settings: { matchType: 'doubles', bestOfGroup: 1, bestOfKO: 3, pointsToWin: 21, deuceEnabled: true, deuceCap: 30 },
+        status: 'active', createdAt: Date.now()
+    };
+
+    return { meta, teams, matches };
+};
+
+/* Load GGS tournament from static data */
+window.loadGGSTournament = function() {
+    const d = window.GGS_DATA;
+    const rosterMap = {};
+    d.teams.forEach(t => { rosterMap[t.name] = { p1: t.p1, p2: t.p2 }; });
+
+    const fixtureRows = d.fixtures.map(f => ({
+        matchNum: f[0], stage: f[1], teamA: f[2], teamB: f[3], time: f[4], court: f[5]
+    }));
+
+    const { meta, teams, matches } = window.buildTournamentFromFixtures(fixtureRows, rosterMap, d.name);
+    TournamentManager.current = TournamentManager.hydrate(meta, teams, matches);
+    localStorage.setItem('ACTIVE_TOURNEY_ID', meta.id);
+    localStorage.setItem('USER_ROLE', 'umpire');
+    if (window.FBM.user) {
+        window.FBM.createTournamentData(meta, teams, matches);
+        window.FBM.startTournamentSync(meta.id, (tourney) => {
+            TournamentManager.current = tourney;
+            if (window.Router.currentView === 'tournament') window.Router.render();
+        });
+    } else {
+        TournamentManager.save();
+    }
+    Toast.show('GGS Tournament 2026 loaded — 32 teams, 8 groups, 48 fixtures!');
+    window.Router.navigate('tournament');
+};
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => { window.Router.init(); window.addEventListener('popstate', () => window.Router.init()); });
 } else { window.Router.init(); window.addEventListener('popstate', () => window.Router.init()); }
