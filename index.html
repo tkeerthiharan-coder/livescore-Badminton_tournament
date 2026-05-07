@@ -694,6 +694,21 @@ window.FBM = {
         this.unsubBoard = onSnapshot(doc(this.db, ...this.basePath, 'match_details', matchId), (d) => {
             if (d.exists()) onUpdate(d.data());
         }, (err) => console.error(err));
+    },
+
+    async saveUmpires(tourneyId, umpires) {
+        if (!this.user || !tourneyId) return;
+        try {
+            await setDoc(doc(this.db, ...this.basePath, 'umpires', tourneyId), { tourneyId, umpires, updatedAt: Date.now() });
+        } catch(e) { console.warn('saveUmpires error', e); }
+    },
+
+    async loadUmpires(tourneyId) {
+        if (!this.user || !tourneyId) return null;
+        try {
+            const d = await getDoc(doc(this.db, ...this.basePath, 'umpires', tourneyId));
+            return d.exists() ? (d.data().umpires || []) : null;
+        } catch(e) { return null; }
     }
 };
 
@@ -1644,7 +1659,7 @@ window.Renderer = {
         } else { proceed(); }
     }}, ['🔑 Master Console']);
 
-    // Umpire button — validates against registered umpires
+    // Umpire button — validates against registered umpires (Firebase first, localStorage fallback)
     const joinUmpireBtn = el('button', { className: 'btn btn-primary flex-1', style:{minWidth:'130px'}, onClick: () => {
         const id = joinInput.value.trim().toUpperCase();
         if (!id) { Toast.show('Please enter a Tournament ID', 2000); return; }
@@ -1656,13 +1671,43 @@ window.Renderer = {
         modal.appendChild(el('div', {className:'text-sm text-secondary mb-md'}, ['Enter your Umpire ID to access your restricted console. Contact the organizer for your ID.']));
         const umpInp = el('input', {type:'text', placeholder:'Umpire ID (e.g. UMP-01)', style:{marginBottom:'16px', textTransform:'uppercase', textAlign:'center', fontSize:'1.1rem', letterSpacing:'4px', fontWeight:'bold'}});
         modal.appendChild(umpInp);
+        const statusMsg = el('div', {style:{fontSize:'0.8rem', color:'var(--text-muted)', textAlign:'center', marginBottom:'8px', minHeight:'18px'}});
+        modal.appendChild(statusMsg);
         const btnRow = el('div', {className:'flex gap-sm'});
         btnRow.appendChild(el('button', {className:'btn btn-ghost flex-1', onClick:()=> overlay.remove()}, ['Cancel']));
-        btnRow.appendChild(el('button', {className:'btn btn-primary flex-1', onClick:()=>{
+        const loginBtn = el('button', {className:'btn btn-primary flex-1'}, ['Login']);
+        loginBtn.addEventListener('click', async () => {
             const umpId = umpInp.value.trim().toUpperCase();
-            const umpires = JSON.parse(localStorage.getItem('REGISTERED_UMPIRES') || '[]');
-            const ump = umpires.find(u => u.id === umpId);
-            if (!ump) { Toast.show('Umpire ID not found. Contact organizer.', 3000); return; }
+            if (!umpId) { Toast.show('Enter your Umpire ID', 2000); return; }
+            loginBtn.disabled = true;
+            statusMsg.textContent = 'Verifying...';
+            statusMsg.style.color = 'var(--accent-primary)';
+
+            // Try Firebase first
+            let ump = null;
+            try {
+                if (window.FBM.user) {
+                    const fbUmpires = await window.FBM.loadUmpires(id);
+                    if (fbUmpires && fbUmpires.length) {
+                        ump = fbUmpires.find(u => u.id === umpId);
+                        // Sync to localStorage for offline fallback
+                        if (fbUmpires.length) localStorage.setItem('REGISTERED_UMPIRES', JSON.stringify(fbUmpires));
+                    }
+                }
+            } catch(e) {}
+
+            // Fallback to localStorage
+            if (!ump) {
+                const localUmpires = JSON.parse(localStorage.getItem('REGISTERED_UMPIRES') || '[]');
+                ump = localUmpires.find(u => u.id === umpId);
+            }
+
+            if (!ump) {
+                statusMsg.textContent = '❌ Umpire ID not found. Contact the organizer.';
+                statusMsg.style.color = 'var(--accent-danger)';
+                loginBtn.disabled = false;
+                return;
+            }
             overlay.remove();
             localStorage.setItem('ACTIVE_TOURNEY_ID', id);
             localStorage.setItem('USER_ROLE', 'spectator'); // umpires get spectator role (restricted by perms)
@@ -1670,8 +1715,9 @@ window.Renderer = {
             localStorage.setItem('UMPIRE_SESSION_NAME', ump.name);
             window.Router.navigate('tournament');
             window.location.reload();
-        }}, ['Login']));
-        umpInp.addEventListener('keydown', e => { if(e.key==='Enter') btnRow.lastChild.click(); });
+        });
+        umpInp.addEventListener('keydown', e => { if(e.key==='Enter') loginBtn.click(); });
+        btnRow.appendChild(loginBtn);
         modal.appendChild(btnRow);
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
@@ -2153,12 +2199,15 @@ window.TournamentHub = {
       
       // Spectator = fan OR umpire. Umpires get filtered tabs based on permissions.
       const isUmpireSession = isSpectator && !!umpSessId;
+      const isFanOnly = isSpectator && !umpSessId;
       const canSeeTeams    = !isSpectator || (isUmpireSession && umpirePerms.canViewTeams !== false);
       const canSeeSchedule = !isSpectator || (isUmpireSession && umpirePerms.canViewSchedule !== false);
       const canSeeGroups   = !isSpectator || (isUmpireSession && umpirePerms.canViewGroups !== false);
       const canSeeBracket  = !isSpectator || (isUmpireSession && umpirePerms.canViewBracket !== false);
       const canSeeStats    = !isSpectator || (isUmpireSession && umpirePerms.canViewStats !== false);
       
+      // Fan spectators always get the Fixtures (live scores) tab first
+      if (isFanOnly) tabOptions.push(['fixtures', '🔴 Live Fixtures']);
       if (canSeeTeams)    tabOptions.push(['teams',    '👥 Teams & Players']);
       if (canSeeSchedule) tabOptions.push(['schedule', '📅 Master Schedule']);
       if (t.format === 'groups' && canSeeGroups) tabOptions.push(['groups', '📊 Group Stages']);
@@ -2170,6 +2219,7 @@ window.TournamentHub = {
       tabOptions.forEach(([key, label]) => { tabs.appendChild(el('div', { className: 'tourney-tab' + (this.activeTab === key ? ' active' : ''), onClick: () => { this.activeTab = key; window.Router.render(); } }, [label])); });
       wrap.appendChild(tabs);
 
+      if (this.activeTab === 'fixtures' && isFanOnly) wrap.appendChild(this._renderLiveFixtures(t));
       if (this.activeTab === 'teams')       wrap.appendChild(this._renderTeamsTab(t, isSpectator));
       if (this.activeTab === 'schedule')    wrap.appendChild(this._renderSchedule(t, isSpectator));
       if (this.activeTab === 'groups')      wrap.appendChild(this._renderGroupsTab(t, isSpectator));
@@ -2624,6 +2674,174 @@ window.TournamentHub = {
   },
 
   /* ═══════════════════════════════════════════════════════════════
+     LIVE FIXTURES TAB — Fan spectator view
+     Shows max 3 live/recent matches with court, team & player names
+  ═══════════════════════════════════════════════════════════════ */
+  _renderLiveFixtures(t) {
+      const wrap = el('div', { className: 'w-full' });
+
+      // Collect all matches
+      let allMatches = [];
+      if (t.groups) t.groups.forEach(g => g.matches.forEach(m => allMatches.push(m)));
+      if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { if (!m.isBye) allMatches.push(m); }));
+
+      // Priority: live first, then pending (upcoming), then completed (recent)
+      const live      = allMatches.filter(m => m.status === 'live');
+      const upcoming  = allMatches.filter(m => m.status === 'pending' && m.teamAId && m.teamBId);
+      const completed = allMatches.filter(m => m.status === 'completed').sort((a,b) => (b.matchNum||0)-(a.matchNum||0));
+
+      // Show up to 3 cards: live first, then upcoming, then recent completed
+      const displayMatches = [...live, ...upcoming, ...completed].slice(0, 3);
+
+      // Header
+      const hdr = el('div', {style:{marginBottom:'20px'}});
+      const liveCount = live.length;
+      const hdrTitle = el('div', {style:{display:'flex',alignItems:'center',gap:'12px',marginBottom:'8px'}});
+      if (liveCount > 0) {
+          const liveBadge = el('div', {style:{display:'flex',alignItems:'center',gap:'6px',background:'rgba(239,83,80,0.15)',border:'1px solid rgba(239,83,80,0.4)',borderRadius:'20px',padding:'4px 12px',animation:'pulseGlow 2s infinite'}});
+          liveBadge.innerHTML = `<span style="width:8px;height:8px;border-radius:50%;background:#ef5350;display:inline-block;animation:pulseGlow 1.5s infinite"></span><span style="font-size:0.85rem;font-weight:800;color:#ef5350">${liveCount} LIVE</span>`;
+          hdrTitle.appendChild(liveBadge);
+      }
+      hdrTitle.appendChild(el('span', {style:{fontFamily:"'Rajdhani',sans-serif",fontWeight:'800',fontSize:'1.4rem',color:'var(--text-primary)'}}, ['Fixtures & Scores']));
+      hdr.appendChild(hdrTitle);
+      hdr.appendChild(el('div', {className:'text-sm text-secondary'}, [`Showing ${displayMatches.length} of ${allMatches.length} matches · Auto-refreshes with live data`]));
+      wrap.appendChild(hdr);
+
+      if (displayMatches.length === 0) {
+          const empty = el('div', {className:'card', style:{textAlign:'center',padding:'48px 24px'}});
+          empty.innerHTML = `<div style="font-size:3rem;margin-bottom:16px">🏸</div><div style="font-weight:700;font-size:1.1rem;color:var(--text-secondary)">No matches scheduled yet</div><div style="color:var(--text-muted);margin-top:8px;font-size:0.9rem">Check back soon!</div>`;
+          wrap.appendChild(empty);
+          return wrap;
+      }
+
+      const grid = el('div', {style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(340px,1fr))',gap:'20px'}});
+
+      displayMatches.forEach(m => {
+          const teamA = t.teams.find(tm => tm.id === m.teamAId);
+          const teamB = t.teams.find(tm => tm.id === m.teamBId);
+          const isLive = m.status === 'live';
+          const isDone = m.status === 'completed';
+          const winA = isDone && m.winnerId === m.teamAId;
+          const winB = isDone && m.winnerId === m.teamBId;
+
+          const card = el('div', {style:{
+              background:'var(--bg-card)',
+              border: isLive ? '2px solid rgba(239,83,80,0.6)' : (isDone ? '1px solid rgba(102,187,106,0.3)' : '1px solid var(--border-color)'),
+              borderRadius:'var(--radius-lg)',
+              overflow:'hidden',
+              boxShadow: isLive ? '0 0 20px rgba(239,83,80,0.15)' : 'var(--shadow-sm)'
+          }});
+
+          // Card top bar: status + stage + court
+          const topBar = el('div', {style:{
+              background: isLive ? 'rgba(239,83,80,0.12)' : (isDone ? 'rgba(102,187,106,0.08)' : 'rgba(0,0,0,0.3)'),
+              padding:'10px 16px',
+              borderBottom:'1px solid var(--border-color)',
+              display:'flex',justifyContent:'space-between',alignItems:'center'
+          }});
+
+          // Status pill
+          const statusPill = el('div', {style:{display:'flex',alignItems:'center',gap:'5px'}});
+          if (isLive) {
+              statusPill.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:#ef5350;display:inline-block;animation:pulseGlow 1.2s infinite"></span><span style="font-size:0.75rem;font-weight:900;color:#ef5350;letter-spacing:0.05em">LIVE</span>`;
+          } else if (isDone) {
+              statusPill.innerHTML = `<span style="font-size:0.75rem;font-weight:800;color:var(--accent-success)">✓ COMPLETED</span>`;
+          } else {
+              const timeStr = m.scheduledTime ? `⏰ ${m.scheduledTime}` : 'UPCOMING';
+              statusPill.innerHTML = `<span style="font-size:0.75rem;font-weight:700;color:var(--text-muted)">${timeStr}</span>`;
+          }
+          topBar.appendChild(statusPill);
+
+          // Right side: court + match#
+          const rightInfo = el('div', {style:{display:'flex',gap:'8px',alignItems:'center'}});
+          if (m.court) {
+              const courtBadge = el('div', {style:{background:'rgba(255,202,40,0.15)',border:'1px solid rgba(255,202,40,0.35)',borderRadius:'6px',padding:'2px 10px',fontSize:'0.8rem',fontWeight:'800',color:'var(--accent-warning)',letterSpacing:'0.03em'}});
+              courtBadge.textContent = `🏟 Court ${m.court}`;
+              rightInfo.appendChild(courtBadge);
+          }
+          rightInfo.appendChild(el('span', {style:{color:'var(--text-muted)',fontSize:'0.72rem',fontWeight:'700'}}, [`M${m.matchNum}`]));
+          topBar.appendChild(rightInfo);
+          card.appendChild(topBar);
+
+          // Stage label
+          if (m.stage) {
+              const stageLine = el('div', {style:{padding:'5px 16px',fontSize:'0.7rem',fontWeight:'700',color:'var(--accent-primary)',textTransform:'uppercase',letterSpacing:'0.06em',background:'rgba(79,195,247,0.05)',borderBottom:'1px solid var(--border-color)'}});
+              stageLine.textContent = m.stage;
+              card.appendChild(stageLine);
+          }
+
+          // Team rows
+          const teamsArea = el('div', {style:{padding:'0'}});
+
+          const makeTeamBlock = (team, labelFallback, scoreVal, isWinner) => {
+              const row = el('div', {style:{
+                  padding:'14px 18px',
+                  borderBottom:'1px solid var(--border-color)',
+                  display:'flex',
+                  justifyContent:'space-between',
+                  alignItems:'center',
+                  background: isWinner ? 'rgba(79,195,247,0.08)' : 'transparent',
+                  borderLeft: isWinner ? '3px solid var(--accent-primary)' : '3px solid transparent'
+              }});
+              const leftSide = el('div', {style:{flex:1}});
+
+              // Team name
+              const teamName = team ? team.name : (labelFallback || 'TBD');
+              const nameEl = el('div', {style:{fontWeight:'800',fontSize:'1rem',color: isWinner ? 'var(--accent-primary)' : 'var(--text-primary)',lineHeight:'1.2'}});
+              nameEl.textContent = teamName;
+              leftSide.appendChild(nameEl);
+
+              // Player names
+              if (team && team.players && team.players.length) {
+                  const playersEl = el('div', {style:{fontSize:'0.75rem',color:'var(--text-muted)',marginTop:'3px',fontWeight:'500'}});
+                  playersEl.textContent = team.players.filter(p=>p?.name?.trim()).map(p=>p.name.trim()).join(' · ');
+                  leftSide.appendChild(playersEl);
+              }
+              row.appendChild(leftSide);
+
+              // Score
+              const scoreEl = el('div', {style:{
+                  fontFamily:"'Roboto Mono',monospace",
+                  fontSize:'2rem',
+                  fontWeight:'900',
+                  color: isWinner ? 'var(--accent-primary)' : (isDone ? 'var(--text-secondary)' : (isLive ? '#fff' : 'var(--text-muted)')),
+                  minWidth:'48px',
+                  textAlign:'right',
+                  lineHeight:'1'
+              }});
+              scoreEl.textContent = isDone || isLive ? (scoreVal !== undefined ? scoreVal : '—') : '—';
+              row.appendChild(scoreEl);
+              return row;
+          };
+
+          teamsArea.appendChild(makeTeamBlock(teamA, m.labelA, m.scoreA, winA));
+          teamsArea.appendChild(makeTeamBlock(teamB, m.labelB, m.scoreB, winB));
+          card.appendChild(teamsArea);
+
+          // Bottom: view live button
+          if (isLive) {
+              const btnArea = el('div', {style:{padding:'12px 16px',background:'rgba(0,0,0,0.2)',textAlign:'center'}});
+              const viewBtn = el('button', {className:'btn btn-danger btn-sm w-full', style:{fontWeight:'800',letterSpacing:'0.05em'}, onClick: () => DisplayManager.launchScoreboard(m.id)}, ['📺 Watch Live Scoreboard']);
+              btnArea.appendChild(viewBtn);
+              card.appendChild(btnArea);
+          }
+
+          grid.appendChild(card);
+      });
+
+      wrap.appendChild(grid);
+
+      // Show "all matches" note if more than 3
+      if (allMatches.length > 3) {
+          const note = el('div', {style:{textAlign:'center',marginTop:'20px',color:'var(--text-muted)',fontSize:'0.85rem',fontWeight:'500'}});
+          note.textContent = `Showing top 3 matches · ${allMatches.length} total matches in this tournament`;
+          wrap.appendChild(note);
+      }
+
+      return wrap;
+  },
+
+  /* ═══════════════════════════════════════════════════════════════
      SETTINGS TAB  — umpire management + permissions + PIN
      Fully rebuilt for clarity and reliable toggle behaviour
   ═══════════════════════════════════════════════════════════════ */
@@ -2695,6 +2913,10 @@ window.TournamentHub = {
           if (umpires.find(u=>u.id===id)) { Toast.show(`ID "${id}" already exists`,'error'); return; }
           umpires.push({id, name, createdAt:Date.now()});
           localStorage.setItem('REGISTERED_UMPIRES', JSON.stringify(umpires));
+          // Save to Firebase so umpires can login from any device
+          if (window.FBM.user && t && t.id) {
+              window.FBM.saveUmpires(t.id, umpires).catch(()=>{});
+          }
           idInp.value=''; nmInp.value='';
           Toast.show(`✅ ${name} (${id}) registered`);
           window.Router.render();
@@ -2713,6 +2935,9 @@ window.TournamentHub = {
               const rmBtn = el('button',{className:'btn btn-danger btn-sm',style:{padding:'4px 12px',fontSize:'0.78rem'}, onClick:()=>{
                   umpires.splice(idx,1);
                   localStorage.setItem('REGISTERED_UMPIRES',JSON.stringify(umpires));
+                  if (window.FBM.user && t && t.id) {
+                      window.FBM.saveUmpires(t.id, umpires).catch(()=>{});
+                  }
                   Toast.show(`${u.name} removed`);
                   window.Router.render();
               }},['✕ Remove']);
