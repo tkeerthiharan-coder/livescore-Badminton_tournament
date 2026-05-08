@@ -3203,7 +3203,7 @@ window.TournamentHub = {
           { key:'canViewBracket',  label:'Knockout Bracket tab',          desc:'Show the elimination bracket',                    def:true  },
           { key:'canViewStats',    label:'Player Stats tab',              desc:'Show match stats and win rates per player',        def:true  },
           { key:'canViewLiveMatch',label:'Open Live Scoreboard',          desc:'Allow umpires to open the stadium display',        def:true  },
-          { key:'canStartMatch',   label:'Start & Score Matches',         desc:'Give umpires the full control panel (use with care)',def:false },
+          { key:'canStartMatch',   label:'Start & Score Matches',         desc:'Allow umpires to start and score any match',def:true },
       ];
       permDefs.forEach(pd => permCard.appendChild(toggleRow(pd.label, pd.desc, pd.key, pd.def)));
       wrap.appendChild(permCard);
@@ -3424,15 +3424,14 @@ window.TournamentHub = {
           const actionsRow = el('div', { className: 'no-print', style: { padding: '12px 16px', textAlign: 'center', background: 'rgba(0,0,0,0.3)', marginTop: 'auto', borderTop:'1px solid var(--border-color)' } });
 
           if (isSpectator) {
-              // Check umpire permissions for viewing and starting
-              const canViewLive   = umpirePerms.canViewLiveMatch !== false;
-              const canStartMatch = umpirePerms.canStartMatch === true;
-              const isUmpireWithStart = isSpectator && !!localStorage.getItem('UMPIRE_SESSION_ID') && canStartMatch;
+              // Umpire sessions always get Start/Resume — no permission gate
+              const isUmpireSession = !!localStorage.getItem('UMPIRE_SESSION_ID');
+              const canViewLive = umpirePerms.canViewLiveMatch !== false;
 
               if (m.status === 'completed') {
                   actionsRow.appendChild(el('span', {className:'text-xs', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['MATCH COMPLETED ✓']));
               } else if (m.status === 'live') {
-                  if (isUmpireWithStart) {
+                  if (isUmpireSession) {
                       actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm w-full', style:{fontSize:'0.85rem',padding:'8px 12px',fontWeight:'bold'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 RESUME & SCORE MATCH']));
                   } else if (canViewLive) {
                       actionsRow.appendChild(el('button', { className: 'btn btn-primary btn-sm w-full', style: {fontSize: '0.85rem', padding: '8px 12px'}, onClick: () => DisplayManager.launchScoreboard(m.id) }, ['📺 View Live Match']));
@@ -3440,13 +3439,10 @@ window.TournamentHub = {
                       actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['LIVE']));
                   }
               } else if (m.status === 'pending' && m.teamAId && m.teamBId) {
-                  if (isUmpireWithStart) {
-                      actionsRow.appendChild(el('button', { className: 'btn btn-success btn-sm w-full', style:{fontSize:'0.85rem',padding:'8px 12px',fontWeight:'800',letterSpacing:'0.04em'}, onClick: () => this._playTournamentMatch(m.id) }, ['🎙️ START & SCORE MATCH']));
-                  } else if (canViewLive) {
-                      // Umpire session without start perm — show time info, no action
-                      actionsRow.appendChild(el('span', {className:'text-xs', style:{color:'var(--accent-warning)',fontWeight:'700'}}, [m.scheduledTime ? `⏰ ${m.scheduledTime}` : 'UPCOMING']));
+                  if (isUmpireSession) {
+                      actionsRow.appendChild(el('button', { className: 'btn btn-success btn-sm w-full', style:{fontSize:'0.85rem',padding:'8px 12px',fontWeight:'800',letterSpacing:'0.04em'}, onClick: () => this._playTournamentMatch(m.id) }, ['🎙️ START MATCH']));
                   } else {
-                      actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['UPCOMING']));
+                      actionsRow.appendChild(el('span', {className:'text-xs', style:{color:'var(--accent-warning)',fontWeight:'700'}}, [m.scheduledTime ? `⏰ ${m.scheduledTime}` : 'UPCOMING']));
                   }
               } else {
                   actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['PENDING TEAMS']));
@@ -3602,19 +3598,17 @@ window.TournamentHub = {
                   mSel.appendChild(makeTeamRow(m.teamA));
                   mSel.appendChild(makeTeamRow(m.teamB));
 
-                  // Action row
-                  const _grpUmpCanStart = isSpectator && umpirePerms.canStartMatch === true && !!localStorage.getItem('UMPIRE_SESSION_ID');
-                  if (!isSpectator && m.status === 'pending' && m.teamAId && m.teamBId) {
+                  // Action row — umpire always gets Start/Resume, no scheduling gate
+                  const _isUmpGrp = isSpectator && !!localStorage.getItem('UMPIRE_SESSION_ID');
+                  if (m.status === 'pending' && m.teamAId && m.teamBId && (!isSpectator || _isUmpGrp)) {
                       const actRow = el('div', {style:{padding:'6px 10px', textAlign:'center', background:'rgba(0,0,0,0.2)', borderTop:'1px solid var(--border-color)'}});
-                      actRow.appendChild(el('button', {className:'btn btn-primary btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, ['▶ Start Match']));
-                      mSel.appendChild(actRow);
-                  } else if (_grpUmpCanStart && m.status === 'pending' && m.teamAId && m.teamBId) {
-                      const actRow = el('div', {style:{padding:'6px 10px', textAlign:'center', background:'rgba(0,0,0,0.2)', borderTop:'1px solid var(--border-color)'}});
-                      actRow.appendChild(el('button', {className:'btn btn-success btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto', fontWeight:'800'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, ['🎙️ Start Match']));
+                      const btnLabel = _isUmpGrp ? '🎙️ Start Match' : '▶ Start Match';
+                      const btnClass = _isUmpGrp ? 'btn btn-success btn-sm w-full no-print' : 'btn btn-primary btn-sm w-full no-print';
+                      actRow.appendChild(el('button', {className: btnClass, style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto', fontWeight:'800'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, [btnLabel]));
                       mSel.appendChild(actRow);
                   } else if (m.status === 'live') {
                       const actRow = el('div', {style:{padding:'6px 10px', textAlign:'center', background:'rgba(0,0,0,0.2)', borderTop:'1px solid var(--border-color)'}});
-                      if (!isSpectator || _grpUmpCanStart) {
+                      if (!isSpectator || _isUmpGrp) {
                           actRow.appendChild(el('button', {className:'btn btn-warning btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto', fontWeight:'bold'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, ['🔴 Resume Live']));
                       } else if (umpirePerms.canViewLiveMatch !== false) {
                           actRow.appendChild(el('button', {className:'btn btn-primary btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto'}, onClick: () => DisplayManager.launchScoreboard(m.id)}, ['📺 Watch Live']));
@@ -3713,14 +3707,17 @@ window.TournamentHub = {
               else {
                   const actionsRow = el('div', { className: 'no-print', style: { padding: '8px', textAlign: 'center', background: 'rgba(0,0,0,0.3)', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px', borderTop:'1px solid var(--border-color)' } });
                   if (isSpectator) {
-                      const _umpCanStart = umpirePerms.canStartMatch === true && !!localStorage.getItem('UMPIRE_SESSION_ID');
+                      const _umpBracket = !!localStorage.getItem('UMPIRE_SESSION_ID');
                       if (m.status === 'completed') actionsRow.appendChild(el('span', {className:'text-xs text-success', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['COMPLETED ✓']));
                       else if (m.status === 'live') {
-                          if (_umpCanStart) actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto', fontWeight:'bold'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 RESUME & SCORE']));
+                          if (_umpBracket) actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto', fontWeight:'bold'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 RESUME & SCORE']));
                           else actionsRow.appendChild(el('button', { className: 'btn btn-primary btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto'}, onClick: () => DisplayManager.launchScoreboard(m.id) }, ['📺 View Live Match']));
                       }
-                      else if (m.status === 'pending' && m.teamA && m.teamB && _umpCanStart) actionsRow.appendChild(el('button', { className: 'btn btn-success btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto', fontWeight:'800'}, onClick: () => this._playTournamentMatch(m.id) }, ['🎙️ START MATCH']));
-                      else actionsRow.appendChild(el('span', {className:'text-xs', style:{color:'var(--text-muted)',fontWeight:'700'}}, [m.scheduledTime ? `⏰ ${m.scheduledTime}` : 'UPCOMING']));
+                      else if (m.status === 'pending' && m.teamA && m.teamB) {
+                          if (_umpBracket) actionsRow.appendChild(el('button', { className: 'btn btn-success btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto', fontWeight:'800'}, onClick: () => this._playTournamentMatch(m.id) }, ['🎙️ START MATCH']));
+                          else actionsRow.appendChild(el('span', {className:'text-xs', style:{color:'var(--text-muted)',fontWeight:'700'}}, [m.scheduledTime ? `⏰ ${m.scheduledTime}` : 'UPCOMING']));
+                      }
+                      else if (!m.teamA || !m.teamB) actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['PENDING TEAMS']));
                   } else {
                       if (m.status === 'completed') {
                           actionsRow.style.display = 'flex';
