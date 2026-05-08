@@ -2216,7 +2216,20 @@ window.TournamentHub = {
       if (!isSpectator)   tabOptions.push(['settings', '⚙️ Settings']);
       
       if (!this.activeTab || !tabOptions.find(opt => opt[0] === this.activeTab)) this.activeTab = tabOptions[0]?.[0] || 'teams';
-      tabOptions.forEach(([key, label]) => { tabs.appendChild(el('div', { className: 'tourney-tab' + (this.activeTab === key ? ' active' : ''), onClick: () => { this.activeTab = key; window.Router.render(); } }, [label])); });
+      tabOptions.forEach(([key, label]) => { tabs.appendChild(el('div', { className: 'tourney-tab' + (this.activeTab === key ? ' active' : ''), onClick: () => {
+          // Clean up live sync when leaving fixtures tab
+          if (this.activeTab === 'fixtures' && key !== 'fixtures') {
+              if (window.TournamentHub._liveSyncUnsub) {
+                  Object.values(window.TournamentHub._liveSyncUnsub).forEach(fn => { if (typeof fn === 'function') fn(); });
+                  window.TournamentHub._liveSyncUnsub = {};
+              }
+              if (window.TournamentHub._livePollerInterval) {
+                  clearInterval(window.TournamentHub._livePollerInterval);
+                  delete window.TournamentHub._livePollerInterval;
+              }
+          }
+          this.activeTab = key; window.Router.render();
+      } }, [label])); });
       wrap.appendChild(tabs);
 
       if (this.activeTab === 'fixtures' && isFanOnly) wrap.appendChild(this._renderLiveFixtures(t));
@@ -2797,7 +2810,11 @@ window.TournamentHub = {
 
           // Stadium card for active match
           const activeM = filtered.find(m=>m.id===this._fixtureSubTab) || filtered[0];
-          if (activeM) stadiumWrap.appendChild(this._renderMatchStadiumCard(t, activeM));
+          if (activeM) {
+              const card = this._renderMatchStadiumCard(t, activeM);
+              card.id = `stadium-card-${activeM.id}`;
+              stadiumWrap.appendChild(card);
+          }
 
           // Match rows
           filtered.forEach(m => {
@@ -2846,8 +2863,20 @@ window.TournamentHub = {
 
               // Score / vs center
               const scoreDiv = el('div', {style:{textAlign:'center',fontFamily:"'Roboto Mono',monospace",fontWeight:'900',fontSize:'1rem',color:'var(--text-secondary)',minWidth:'60px'}});
-              if (isDone || isLive) {
+              if (isDone) {
                   scoreDiv.innerHTML = `<span style="color:#4fc3f7">${m.scoreA||0}</span> <span style="color:rgba(255,255,255,0.3);font-size:0.75rem">—</span> <span style="color:#ef5350">${m.scoreB||0}</span>`;
+              } else if (isLive) {
+                  // Show live point score from cache if available
+                  const lsCache = window.TournamentHub?._liveStateCache?.[m.id];
+                  let rowPtA = m.scoreA||0, rowPtB = m.scoreB||0;
+                  if (lsCache && lsCache.games) {
+                      const lg = lsCache.games[lsCache.currentGame];
+                      if (lg) { rowPtA = lg.scoreA; rowPtB = lg.scoreB; }
+                  } else if (window.AppState?.current && window.AppState?.activeMatchId === m.id && window.AppState.current.games) {
+                      const lg = window.AppState.current.games[window.AppState.current.currentGame];
+                      if (lg) { rowPtA = lg.scoreA; rowPtB = lg.scoreB; }
+                  }
+                  scoreDiv.innerHTML = `<span style="color:#4fc3f7;font-size:1.2rem">${rowPtA}</span><span style="color:#ef5350;font-size:0.55rem;display:block;letter-spacing:0.05em;animation:pulseGlow 1.2s infinite">●LIVE</span><span style="color:#ef5350;font-size:1.2rem">${rowPtB}</span>`;
               } else {
                   const info = el('div', {style:{display:'flex',flexDirection:'column',alignItems:'center',gap:'2px'}});
                   info.appendChild(el('span', {style:{fontSize:'0.8rem',opacity:'0.4'}}, ['VS']));
@@ -2895,6 +2924,84 @@ window.TournamentHub = {
       statusSel.addEventListener('change', renderList);
       courtSel.addEventListener('change', renderList);
       groupSel.addEventListener('change', renderList);
+
+      // ── LIVE SCORE SYNC ─────────────────────────────────────────────────
+      // When the selected match is live, subscribe to match_details for real-time
+      // point scores. Unsubscribe whenever selection changes or tab changes.
+      if (!window.TournamentHub._liveStateCache) window.TournamentHub._liveStateCache = {};
+      if (!window.TournamentHub._liveSyncUnsub) window.TournamentHub._liveSyncUnsub = {};
+
+      const subscribeToLiveMatch = (matchId) => {
+          // Unsubscribe any existing subscription for other matches
+          Object.keys(window.TournamentHub._liveSyncUnsub).forEach(oldId => {
+              if (oldId !== matchId && typeof window.TournamentHub._liveSyncUnsub[oldId] === 'function') {
+                  window.TournamentHub._liveSyncUnsub[oldId]();
+                  delete window.TournamentHub._liveSyncUnsub[oldId];
+              }
+          });
+
+          if (!matchId) return;
+          // Already subscribed to this match
+          if (window.TournamentHub._liveSyncUnsub[matchId]) return;
+
+          if (window.FBM && window.FBM.user && window.FBM.db) {
+              // Firebase: real-time listener on match_details
+              window.TournamentHub._liveSyncUnsub[matchId] = window.FBM.startBoardSync(matchId, (state) => {
+                  if (!state) return;
+                  window.TournamentHub._liveStateCache[matchId] = state;
+                  // Re-render only the stadium card in-place without full Router re-render
+                  const stadiumEl = document.getElementById(`stadium-card-${matchId}`);
+                  if (stadiumEl) {
+                      const fresh = window.TournamentHub._renderMatchStadiumCard(t, allMatches.find(mx=>mx.id===matchId)||allMatches[0]);
+                      fresh.id = `stadium-card-${matchId}`;
+                      stadiumEl.replaceWith(fresh);
+                  }
+              });
+          } else {
+              // LocalStorage mode: poll AppState every 800ms for same-window scoring
+              if (window.TournamentHub._livePollerInterval) clearInterval(window.TournamentHub._livePollerInterval);
+              window.TournamentHub._livePollerInterval = setInterval(() => {
+                  const state = window.AppState?.current;
+                  if (state && window.AppState?.activeMatchId === matchId) {
+                      const cached = window.TournamentHub._liveStateCache[matchId];
+                      const curGame = state.games?.[state.currentGame];
+                      const cachedGame = cached?.games?.[cached?.currentGame];
+                      // Only re-render if score actually changed
+                      if (!cached || curGame?.scoreA !== cachedGame?.scoreA || curGame?.scoreB !== cachedGame?.scoreB || state.gamesWon?.A !== cached?.gamesWon?.A) {
+                          window.TournamentHub._liveStateCache[matchId] = state;
+                          const stadiumEl = document.getElementById(`stadium-card-${matchId}`);
+                          if (stadiumEl) {
+                              const fresh = window.TournamentHub._renderMatchStadiumCard(t, allMatches.find(mx=>mx.id===matchId)||allMatches[0]);
+                              fresh.id = `stadium-card-${matchId}`;
+                              stadiumEl.replaceWith(fresh);
+                          }
+                      }
+                  }
+              }, 800);
+              window.TournamentHub._liveSyncUnsub[matchId] = () => {
+                  clearInterval(window.TournamentHub._livePollerInterval);
+                  delete window.TournamentHub._livePollerInterval;
+              };
+          }
+      };
+
+      // Start syncing for the current active match if it's live
+      const startActiveSync = () => {
+          const activeM = sorted.find(m => m.id === this._fixtureSubTab);
+          if (activeM && activeM.status === 'live') {
+              subscribeToLiveMatch(activeM.id);
+          } else {
+              // Not live — clear all subscriptions
+              Object.values(window.TournamentHub._liveSyncUnsub).forEach(unsub => { if (typeof unsub === 'function') unsub(); });
+              window.TournamentHub._liveSyncUnsub = {};
+              if (window.TournamentHub._livePollerInterval) {
+                  clearInterval(window.TournamentHub._livePollerInterval);
+                  delete window.TournamentHub._livePollerInterval;
+              }
+          }
+      };
+
+      startActiveSync();
 
       return wrap;
   },
@@ -2947,9 +3054,37 @@ window.TournamentHub = {
           gap:'3px', padding:'3px'
       }});
 
-      // Score values
-      const scoreA = isDone ? m.scoreA : (isLive ? m.scoreA : '—');
-      const scoreB = isDone ? m.scoreB : (isLive ? m.scoreB : '—');
+      // ── LIVE SCORE: read from AppState/Firebase match_details ──────────
+      // m.scoreA/scoreB = game wins (0,1,2). For the in-progress current game
+      // we need the live point score from match_details.
+      let liveState = null;
+      if (isLive) {
+          // Try AppState first (same window, umpire scoring locally)
+          if (window.AppState && window.AppState.current && window.AppState.activeMatchId === m.id) {
+              liveState = window.AppState.current;
+          }
+          // Try the cached live state stored on TournamentHub for this match
+          if (!liveState && window.TournamentHub._liveStateCache) {
+              liveState = window.TournamentHub._liveStateCache[m.id] || null;
+          }
+      }
+
+      // Extract point scores from liveState if available
+      let ptScoreA = '—', ptScoreB = '—';
+      let gameWinsA = m.scoreA || 0, gameWinsB = m.scoreB || 0;
+      let currentGameNum = 1, serverSide = null;
+      if (liveState && liveState.games) {
+          const curGame = liveState.games[liveState.currentGame] || liveState.games[liveState.games.length - 1];
+          if (curGame) { ptScoreA = curGame.scoreA; ptScoreB = curGame.scoreB; }
+          gameWinsA = liveState.gamesWon?.A || 0;
+          gameWinsB = liveState.gamesWon?.B || 0;
+          currentGameNum = (liveState.currentGame || 0) + 1;
+          serverSide = liveState.serverSide || null;
+      }
+
+      // Score values — use live point score for live matches, game wins for done
+      const scoreA = isDone ? m.scoreA : (isLive ? ptScoreA : '—');
+      const scoreB = isDone ? m.scoreB : (isLive ? ptScoreB : '—');
 
       // Helper: team panel (header + score)
       const makeTeamPanel = (name, players, scoreVal, side, isWinner) => {
@@ -3015,19 +3150,19 @@ window.TournamentHub = {
           alignItems:'center', justifyContent:'space-between', gap:'0'
       }});
 
-      // Game-wins row
+      // Game-wins row — uses live gameWinsA/B when live
       const gwRow = el('div', {style:{
           display:'flex', gap:'3px', width:'100%', padding:'8px',
           borderBottom:'1px solid rgba(255,255,255,0.06)', flex:'0 0 auto'
       }});
       const gwA = el('div', {style:{flex:1, textAlign:'center', background:'rgba(26,115,232,0.2)', borderRadius:'4px', padding:'8px 4px'}});
-      gwA.innerHTML = `<div style="font-family:'Roboto Mono',monospace;font-size:1.6rem;font-weight:900;color:#4fc3f7">${isDone||isLive ? (m.scoreA||0) : '0'}</div><div style="font-size:0.6rem;color:rgba(255,255,255,0.4);font-weight:700;text-transform:uppercase;margin-top:2px">Games</div>`;
+      gwA.innerHTML = `<div style="font-family:'Roboto Mono',monospace;font-size:1.6rem;font-weight:900;color:#4fc3f7">${gameWinsA}</div><div style="font-size:0.6rem;color:rgba(255,255,255,0.4);font-weight:700;text-transform:uppercase;margin-top:2px">Games</div>`;
       const gwB = el('div', {style:{flex:1, textAlign:'center', background:'rgba(234,67,53,0.2)', borderRadius:'4px', padding:'8px 4px'}});
-      gwB.innerHTML = `<div style="font-family:'Roboto Mono',monospace;font-size:1.6rem;font-weight:900;color:#ef5350">${isDone||isLive ? (m.scoreB||0) : '0'}</div><div style="font-size:0.6rem;color:rgba(255,255,255,0.4);font-weight:700;text-transform:uppercase;margin-top:2px">Games</div>`;
+      gwB.innerHTML = `<div style="font-family:'Roboto Mono',monospace;font-size:1.6rem;font-weight:900;color:#ef5350">${gameWinsB}</div><div style="font-size:0.6rem;color:rgba(255,255,255,0.4);font-weight:700;text-transform:uppercase;margin-top:2px">Games</div>`;
       gwRow.appendChild(gwA); gwRow.appendChild(gwB);
       center.appendChild(gwRow);
 
-      // Status text
+      // Status text + game number + server indicator
       const statusBox = el('div', {style:{
           flex:'1', display:'flex', flexDirection:'column',
           alignItems:'center', justifyContent:'center',
@@ -3037,6 +3172,13 @@ window.TournamentHub = {
       const statusColor = isLive ? '#ef5350' : (isDone ? 'var(--accent-success)' : 'var(--text-muted)');
       statusBox.appendChild(el('div', {style:{fontSize:'0.65rem', fontWeight:'900', color:statusColor, letterSpacing:'0.12em', textTransform:'uppercase'}}, [statusText]));
       statusBox.appendChild(el('div', {style:{fontSize:'1.4rem', color:'#fff', fontWeight:'900', fontFamily:"'Roboto Mono',monospace"}}, ['VS']));
+      if (isLive) {
+          statusBox.appendChild(el('div', {style:{fontSize:'0.6rem', color:'rgba(255,255,255,0.4)', fontWeight:'700', marginTop:'2px'}}, [`Game ${currentGameNum}`]));
+          if (serverSide) {
+              const srvLabel = serverSide === 'A' ? nameA.split(' ')[0] : nameB.split(' ')[0];
+              statusBox.appendChild(el('div', {style:{fontSize:'0.58rem', color:'var(--accent-warning)', fontWeight:'700', marginTop:'2px'}}, [`🏸 Serving: ${srvLabel}`]));
+          }
+      }
       center.appendChild(statusBox);
 
       // Live indicator dots for live match
