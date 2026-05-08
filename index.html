@@ -2675,17 +2675,16 @@ window.TournamentHub = {
 
   /* ═══════════════════════════════════════════════════════════════
      LIVE FIXTURES TAB — Fan spectator view
-     Each live/upcoming match gets its own sub-tab showing the
-     stadium scoreboard layout with real-time Firebase sync
+     ALL matches shown, with search + status filter + court filter.
+     Active match expands into the full stadium card.
   ═══════════════════════════════════════════════════════════════ */
   _renderLiveFixtures(t) {
       const wrap = el('div', { className: 'w-full' });
 
-      // Collect ALL matches (groups + knockout, no byes)
+      // Collect all matches, sorted: live first → pending → completed
       let allMatches = [];
       if (t.groups) t.groups.forEach(g => g.matches.forEach(m => allMatches.push(m)));
       if (t.koMatches) t.koMatches.forEach(r => r.forEach(m => { if (!m.isBye) allMatches.push(m); }));
-      allMatches.sort((a,b) => (a.matchNum||0) - (b.matchNum||0));
 
       if (allMatches.length === 0) {
           const empty = el('div', {className:'card', style:{textAlign:'center',padding:'48px 24px',marginTop:'8px'}});
@@ -2694,221 +2693,208 @@ window.TournamentHub = {
           return wrap;
       }
 
-      // ── State (persisted on this object) ───────────
-      if (!this._fxSearch)  this._fxSearch  = '';
-      if (!this._fxFilter)  this._fxFilter  = 'all'; // all | live | upcoming | completed
-      if (this._fixtureSubTab === undefined) this._fixtureSubTab = allMatches[0]?.id;
+      // ── Stats bar ────────────────────────────────
+      const liveCount    = allMatches.filter(m => m.status === 'live').length;
+      const pendingCount = allMatches.filter(m => m.status === 'pending').length;
+      const doneCount    = allMatches.filter(m => m.status === 'completed').length;
+      const courts       = [...new Set(allMatches.map(m=>m.court).filter(Boolean))].sort((a,b)=>Number(a)-Number(b));
 
-      // ── Live count badge ─────────────────────────
-      const liveCount = allMatches.filter(m => m.status === 'live').length;
-      const headerRow = el('div', {style:{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'16px', flexWrap:'wrap', gap:'8px'}});
-      const titlePart = el('div', {style:{display:'flex', alignItems:'center', gap:'10px'}});
-      titlePart.appendChild(el('span', {style:{fontFamily:"'Rajdhani',sans-serif", fontWeight:'900', fontSize:'1.35rem', color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:'0.04em'}}, ['All Fixtures']));
-      if (liveCount > 0) {
-          const liveBadge = el('div', {style:{display:'flex', alignItems:'center', gap:'5px', background:'rgba(239,83,80,0.15)', border:'1px solid rgba(239,83,80,0.4)', borderRadius:'20px', padding:'3px 10px'}});
-          liveBadge.innerHTML = `<span style="width:7px;height:7px;border-radius:50%;background:#ef5350;display:inline-block;animation:pulseGlow 1.2s infinite"></span><span style="font-size:0.75rem;font-weight:900;color:#ef5350">${liveCount} LIVE</span>`;
-          titlePart.appendChild(liveBadge);
-      }
-      titlePart.appendChild(el('span', {style:{fontSize:'0.8rem', color:'var(--text-muted)', fontWeight:'500'}}, [`${allMatches.length} matches`]));
-      headerRow.appendChild(titlePart);
-      wrap.appendChild(headerRow);
-
-      // ── Search + Filter bar ───────────────────────
-      const controlBar = el('div', {style:{display:'flex', gap:'10px', marginBottom:'16px', flexWrap:'wrap', alignItems:'center'}});
-
-      // Search input
-      const searchInp = el('input', {
-          type:'text', placeholder:'🔍  Search team or player name…',
-          value: this._fxSearch,
-          style:{flex:'1 1 200px', minWidth:'160px', padding:'9px 14px', borderRadius:'var(--radius-md)', border:'1px solid var(--border-color)', background:'var(--bg-input)', color:'var(--text-primary)', fontSize:'0.9rem', fontWeight:'500'}
-      });
-      searchInp.addEventListener('input', e => {
-          this._fxSearch = e.target.value.toLowerCase().trim();
-          updateList();
-      });
-      controlBar.appendChild(searchInp);
-
-      // Status filter pills
-      const filterDefs = [
-          {val:'all',      label:'All'},
-          {val:'live',     label:'🔴 Live'},
-          {val:'upcoming', label:'⏰ Upcoming'},
-          {val:'completed',label:'✓ Done'},
-      ];
-      const filterPills = el('div', {style:{display:'flex', gap:'6px', flexWrap:'wrap'}});
-      const pillEls = {};
-      filterDefs.forEach(fd => {
-          const pill = el('button', {
-              style:{
-                  padding:'7px 14px', borderRadius:'20px', fontSize:'0.8rem', fontWeight:'700', cursor:'pointer', border:'1.5px solid',
-                  borderColor: this._fxFilter === fd.val ? 'var(--accent-primary)' : 'var(--border-color)',
-                  background:  this._fxFilter === fd.val ? 'rgba(79,195,247,0.15)' : 'transparent',
-                  color:       this._fxFilter === fd.val ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                  transition:'all 0.15s'
-              },
-              onClick: () => {
-                  this._fxFilter = fd.val;
-                  Object.entries(pillEls).forEach(([k,p]) => {
-                      const active = k === fd.val;
-                      p.style.borderColor  = active ? 'var(--accent-primary)' : 'var(--border-color)';
-                      p.style.background   = active ? 'rgba(79,195,247,0.15)' : 'transparent';
-                      p.style.color        = active ? 'var(--accent-primary)' : 'var(--text-secondary)';
-                  });
-                  updateList();
-              }
-          }, [fd.label]);
-          pillEls[fd.val] = pill;
-          filterPills.appendChild(pill);
-      });
-      controlBar.appendChild(filterPills);
-      wrap.appendChild(controlBar);
-
-      // ── Match list + stadium card layout ─────────
-      const layout = el('div', {style:{display:'grid', gridTemplateColumns:'300px 1fr', gap:'16px', alignItems:'start'}});
-
-      // Left: scrollable match list
-      const listPanel = el('div', {style:{
-          background:'var(--bg-card)', borderRadius:'var(--radius-lg)',
-          border:'1px solid var(--border-color)', overflow:'hidden',
-          maxHeight:'640px', display:'flex', flexDirection:'column'
-      }});
-      const listScroll = el('div', {style:{overflowY:'auto', flex:'1'}});
-      listPanel.appendChild(listScroll);
-
-      // Right: stadium card
-      const cardPanel = el('div');
-
-      layout.appendChild(listPanel);
-      layout.appendChild(cardPanel);
-      wrap.appendChild(layout);
-
-      // ── Render helpers ────────────────────────────
-      const renderCard = (m) => {
-          cardPanel.innerHTML = '';
-          if (m) cardPanel.appendChild(this._renderMatchStadiumCard(t, m));
+      const statsBar = el('div', {style:{display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'16px', alignItems:'center'}});
+      const mkChip = (icon, val, label, color) => {
+          const c = el('div', {style:{display:'flex',alignItems:'center',gap:'5px',background:`${color}15`,border:`1px solid ${color}40`,padding:'5px 12px',borderRadius:'20px',fontSize:'0.78rem',fontWeight:'700',color}});
+          c.innerHTML = `${icon} <span style="font-size:1rem;font-weight:900">${val}</span> <span style="opacity:0.7;font-weight:500">${label}</span>`;
+          return c;
       };
+      if (liveCount)    statsBar.appendChild(mkChip('🔴', liveCount, 'Live', '#ef5350'));
+      statsBar.appendChild(mkChip('⏳', pendingCount, 'Upcoming', '#ffca28'));
+      statsBar.appendChild(mkChip('✅', doneCount, 'Completed', '#66bb6a'));
+      statsBar.appendChild(mkChip('🏸', allMatches.length, 'Total', '#4fc3f7'));
+      wrap.appendChild(statsBar);
 
-      const updateList = () => {
-          listScroll.innerHTML = '';
-          const q     = this._fxSearch;
-          const filt  = this._fxFilter;
+      // ── Search + Filter bar ──────────────────────
+      const filterBar = el('div', {style:{display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'16px'}});
 
-          const filtered = allMatches.filter(m => {
-              // Status filter
-              if (filt === 'live'      && m.status !== 'live')      return false;
-              if (filt === 'upcoming'  && m.status !== 'pending')   return false;
-              if (filt === 'completed' && m.status !== 'completed') return false;
+      const searchInp = el('input', {type:'text', placeholder:'🔍  Search team name…',
+          style:{flex:'1', minWidth:'160px', padding:'8px 12px', fontSize:'0.85rem',
+                 background:'var(--bg-card)', border:'1px solid var(--border-color)',
+                 borderRadius:'var(--radius-sm)', color:'var(--text-primary)'}});
 
-              // Search
-              if (q) {
-                  const teamA  = t.teams.find(tm => tm.id === m.teamAId);
-                  const teamB  = t.teams.find(tm => tm.id === m.teamBId);
-                  const namesA = [teamA?.name, ...(teamA?.players||[]).map(p=>p?.name)].filter(Boolean).join(' ').toLowerCase();
-                  const namesB = [teamB?.name, ...(teamB?.players||[]).map(p=>p?.name)].filter(Boolean).join(' ').toLowerCase();
-                  const meta   = `m${m.matchNum} ${m.stage||''} ${m.court||''}`.toLowerCase();
-                  if (!namesA.includes(q) && !namesB.includes(q) && !meta.includes(q)) return false;
-              }
+      const statusSel = el('select', {style:{padding:'8px 12px', fontSize:'0.85rem',
+          background:'var(--bg-card)', border:'1px solid var(--border-color)',
+          borderRadius:'var(--radius-sm)', color:'var(--text-primary)', minWidth:'130px'}});
+      [['', 'All Status'], ['live','🔴 Live'], ['pending','⏳ Upcoming'], ['completed','✅ Completed']]
+          .forEach(([v,l]) => statusSel.appendChild(el('option',{value:v},[l])));
+
+      const courtSel = el('select', {style:{padding:'8px 12px', fontSize:'0.85rem',
+          background:'var(--bg-card)', border:'1px solid var(--border-color)',
+          borderRadius:'var(--radius-sm)', color:'var(--text-primary)', minWidth:'120px'}});
+      courtSel.appendChild(el('option',{value:''},['All Courts']));
+      courts.forEach(c => courtSel.appendChild(el('option',{value:c},[`Court ${c}`])));
+
+      const groupSel = el('select', {style:{padding:'8px 12px', fontSize:'0.85rem',
+          background:'var(--bg-card)', border:'1px solid var(--border-color)',
+          borderRadius:'var(--radius-sm)', color:'var(--text-primary)', minWidth:'120px'}});
+      groupSel.appendChild(el('option',{value:''},['All Groups']));
+      (t.groups||[]).forEach(g => groupSel.appendChild(el('option',{value:g.id},[`Group ${g.id}`])));
+
+      filterBar.appendChild(searchInp);
+      filterBar.appendChild(statusSel);
+      if (courts.length > 1) filterBar.appendChild(courtSel);
+      if (t.groups?.length > 1) filterBar.appendChild(groupSel);
+      wrap.appendChild(filterBar);
+
+      // ── Active match stadium card (top) ──────────
+      const stadiumWrap = el('div', {style:{marginBottom:'20px'}});
+      wrap.appendChild(stadiumWrap);
+
+      // ── Match list ───────────────────────────────
+      const listWrap = el('div', {style:{display:'flex', flexDirection:'column', gap:'8px'}});
+      wrap.appendChild(listWrap);
+
+      // Sorted order: live → pending → completed
+      const sorted = [
+          ...allMatches.filter(m=>m.status==='live'),
+          ...allMatches.filter(m=>m.status==='pending').sort((a,b)=>(a.matchNum||0)-(b.matchNum||0)),
+          ...allMatches.filter(m=>m.status==='completed').sort((a,b)=>(b.matchNum||0)-(a.matchNum||0)),
+      ];
+
+      // Init active match
+      if (!this._fixtureSubTab || !sorted.find(m=>m.id===this._fixtureSubTab)) {
+          const firstLive = sorted.find(m=>m.status==='live');
+          this._fixtureSubTab = (firstLive || sorted[0])?.id;
+      }
+
+      const renderList = () => {
+          const q    = searchInp.value.trim().toLowerCase();
+          const sf   = statusSel.value;
+          const cf   = courtSel.value;
+          const gf   = groupSel.value;
+
+          listWrap.innerHTML = '';
+          stadiumWrap.innerHTML = '';
+
+          const filtered = sorted.filter(m => {
+              const tA = t.teams.find(tm=>tm.id===m.teamAId)?.name || m.labelA || '';
+              const tB = t.teams.find(tm=>tm.id===m.teamBId)?.name || m.labelB || '';
+              if (q && !tA.toLowerCase().includes(q) && !tB.toLowerCase().includes(q) && !String(m.matchNum).includes(q)) return false;
+              if (sf && m.status !== sf) return false;
+              if (cf && m.court !== cf) return false;
+              if (gf && m.groupId !== gf && !(m.stage||'').includes(`Group ${gf}`)) return false;
               return true;
           });
 
           if (filtered.length === 0) {
-              const empty = el('div', {style:{padding:'24px', textAlign:'center', color:'var(--text-muted)', fontSize:'0.88rem', fontWeight:'500'}});
-              empty.textContent = q ? `No matches found for "${q}"` : 'No matches in this filter';
-              listScroll.appendChild(empty);
-              cardPanel.innerHTML = '';
+              const empty = el('div', {style:{textAlign:'center',padding:'32px',color:'var(--text-muted)',fontStyle:'italic',background:'var(--bg-card)',borderRadius:'var(--radius-md)'}});
+              empty.textContent = 'No matches match your search/filter.';
+              listWrap.appendChild(empty);
               return;
           }
 
-          // Auto-select first if current selection not in filtered list
-          if (!filtered.find(m => m.id === this._fixtureSubTab)) {
+          // Ensure activeTab is in filtered results
+          if (!filtered.find(m=>m.id===this._fixtureSubTab)) {
               this._fixtureSubTab = filtered[0].id;
-              renderCard(filtered[0]);
           }
 
+          // Stadium card for active match
+          const activeM = filtered.find(m=>m.id===this._fixtureSubTab) || filtered[0];
+          if (activeM) stadiumWrap.appendChild(this._renderMatchStadiumCard(t, activeM));
+
+          // Match rows
           filtered.forEach(m => {
-              const isLive   = m.status === 'live';
-              const isDone   = m.status === 'completed';
+              const isLive = m.status === 'live';
+              const isDone = m.status === 'completed';
               const isActive = m.id === this._fixtureSubTab;
-              const teamA    = t.teams.find(tm => tm.id === m.teamAId);
-              const teamB    = t.teams.find(tm => tm.id === m.teamBId);
-              const nameA    = teamA ? teamA.name : (m.labelA || 'TBD');
-              const nameB    = teamB ? teamB.name : (m.labelB || 'TBD');
+              const tA = t.teams.find(tm=>tm.id===m.teamAId);
+              const tB = t.teams.find(tm=>tm.id===m.teamBId);
+              const nameA = tA?.name || m.labelA || 'TBD';
+              const nameB = tB?.name || m.labelB || 'TBD';
 
               const row = el('div', {
                   style:{
-                      padding:'10px 14px', cursor:'pointer', userSelect:'none',
-                      borderBottom:'1px solid var(--border-color)',
-                      background: isActive
-                          ? 'rgba(79,195,247,0.12)'
-                          : (isLive ? 'rgba(239,83,80,0.05)' : 'transparent'),
-                      borderLeft: isActive ? '3px solid var(--accent-primary)' : '3px solid transparent',
-                      transition:'background 0.15s'
+                      display:'grid',
+                      gridTemplateColumns:'52px 1fr auto 1fr 90px',
+                      alignItems:'center', gap:'10px',
+                      padding:'10px 14px',
+                      borderRadius:'var(--radius-sm)',
+                      cursor:'pointer',
+                      border: isActive ? '2px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                      background: isActive ? 'rgba(79,195,247,0.08)' : isLive ? 'rgba(239,83,80,0.05)' : 'var(--bg-card)',
+                      transition:'all 0.15s',
                   },
-                  onClick: () => {
-                      this._fixtureSubTab = m.id;
-                      // Update active state without full re-render
-                      listScroll.querySelectorAll('[data-mrow]').forEach(r => {
-                          const rid = r.getAttribute('data-mrow');
-                          r.style.background   = rid === m.id ? 'rgba(79,195,247,0.12)' : (r.getAttribute('data-live')==='1' ? 'rgba(239,83,80,0.05)' : 'transparent');
-                          r.style.borderLeft   = rid === m.id ? '3px solid var(--accent-primary)' : '3px solid transparent';
-                      });
-                      renderCard(m);
-                  }
+                  onClick: () => { this._fixtureSubTab = m.id; renderList(); }
               });
-              row.setAttribute('data-mrow', m.id);
-              row.setAttribute('data-live', isLive ? '1' : '0');
 
-              // Top line: match num + status badge + court
-              const topLine = el('div', {style:{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px'}});
-              const leftBit = el('div', {style:{display:'flex', alignItems:'center', gap:'6px'}});
-              leftBit.appendChild(el('span', {style:{fontSize:'0.72rem', fontWeight:'900', color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)', fontFamily:"'Roboto Mono',monospace"}}, [`M${m.matchNum}`]));
-              if (m.stage) leftBit.appendChild(el('span', {style:{fontSize:'0.65rem', color:'var(--text-muted)', fontWeight:'600', maxWidth:'90px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}, [m.stage]));
-              topLine.appendChild(leftBit);
-
-              const statusBadge = el('div', {style:{
-                  fontSize:'0.62rem', fontWeight:'900', letterSpacing:'0.06em',
-                  padding:'2px 7px', borderRadius:'10px',
-                  background: isLive ? 'rgba(239,83,80,0.2)' : (isDone ? 'rgba(102,187,106,0.15)' : 'rgba(255,255,255,0.07)'),
-                  color: isLive ? '#ef5350' : (isDone ? 'var(--accent-success)' : 'var(--text-muted)'),
-                  display:'flex', alignItems:'center', gap:'4px'
-              }});
-              if (isLive) statusBadge.innerHTML = `<span style="width:5px;height:5px;border-radius:50%;background:#ef5350;display:inline-block;animation:pulseGlow 1.2s infinite"></span>LIVE`;
-              else statusBadge.textContent = isDone ? '✓ DONE' : (m.scheduledTime || 'UPCOMING');
-              topLine.appendChild(statusBadge);
-              row.appendChild(topLine);
-
-              // Team names
-              const teamsLine = el('div', {style:{fontSize:'0.85rem', fontWeight:'700', color: isActive ? '#fff' : 'var(--text-secondary)', lineHeight:'1.5'}});
-              teamsLine.textContent = `${nameA} vs ${nameB}`;
-              row.appendChild(teamsLine);
-
-              // Court + score hint
-              const bottomLine = el('div', {style:{display:'flex', gap:'8px', marginTop:'2px', alignItems:'center'}});
-              if (m.court) {
-                  bottomLine.appendChild(el('span', {style:{fontSize:'0.65rem', color:'var(--accent-warning)', fontWeight:'700', background:'rgba(255,202,40,0.1)', padding:'1px 6px', borderRadius:'8px'}}, [`🏟 Court ${m.court}`]));
+              // Status badge
+              const badge = el('div', {style:{textAlign:'center'}});
+              if (isLive) {
+                  badge.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(239,83,80,0.15);border:1px solid rgba(239,83,80,0.5);border-radius:12px;padding:2px 8px;font-size:0.65rem;font-weight:900;color:#ef5350;letter-spacing:0.06em"><span style="width:6px;height:6px;border-radius:50%;background:#ef5350;display:inline-block;animation:pulseGlow 1.2s infinite"></span>LIVE</span>`;
+              } else if (isDone) {
+                  badge.innerHTML = `<span style="font-size:0.68rem;font-weight:800;color:var(--accent-success)">✓ DONE</span>`;
+              } else {
+                  badge.innerHTML = `<span style="font-size:0.68rem;font-weight:700;color:var(--text-muted)">M${m.matchNum}</span>`;
               }
-              if ((isLive || isDone) && (m.scoreA !== undefined || m.scoreB !== undefined)) {
-                  bottomLine.appendChild(el('span', {style:{fontSize:'0.72rem', fontFamily:"'Roboto Mono',monospace", fontWeight:'800', color: isLive ? '#ef5350' : 'var(--text-muted)'}}, [`${m.scoreA??0} – ${m.scoreB??0}`]));
-              }
-              if (bottomLine.children.length) row.appendChild(bottomLine);
+              row.appendChild(badge);
 
-              listScroll.appendChild(row);
+              // Team A
+              const tADiv = el('div', {style:{textAlign:'right'}});
+              tADiv.appendChild(el('div', {style:{fontWeight:'700',fontSize:'0.9rem',color: m.winnerId===m.teamAId?'var(--accent-success)':'var(--text-primary)',lineHeight:'1.2'}}, [nameA]));
+              if (tA?.players?.length) {
+                  const p = tA.players.filter(p=>p?.name?.trim()).map(p=>p.name.trim()).join(' · ');
+                  tADiv.appendChild(el('div', {style:{fontSize:'0.68rem',color:'var(--text-muted)',marginTop:'2px'}}, [p]));
+              }
+              row.appendChild(tADiv);
+
+              // Score / vs center
+              const scoreDiv = el('div', {style:{textAlign:'center',fontFamily:"'Roboto Mono',monospace",fontWeight:'900',fontSize:'1rem',color:'var(--text-secondary)',minWidth:'60px'}});
+              if (isDone || isLive) {
+                  scoreDiv.innerHTML = `<span style="color:#4fc3f7">${m.scoreA||0}</span> <span style="color:rgba(255,255,255,0.3);font-size:0.75rem">—</span> <span style="color:#ef5350">${m.scoreB||0}</span>`;
+              } else {
+                  const info = el('div', {style:{display:'flex',flexDirection:'column',alignItems:'center',gap:'2px'}});
+                  info.appendChild(el('span', {style:{fontSize:'0.8rem',opacity:'0.4'}}, ['VS']));
+                  if (m.court) info.appendChild(el('span', {style:{fontSize:'0.63rem',color:'var(--accent-warning)',fontWeight:'700',background:'rgba(255,202,40,0.1)',padding:'1px 5px',borderRadius:'4px'}}, [`C${m.court}`]));
+                  scoreDiv.appendChild(info);
+              }
+              row.appendChild(scoreDiv);
+
+              // Team B
+              const tBDiv = el('div', {style:{textAlign:'left'}});
+              tBDiv.appendChild(el('div', {style:{fontWeight:'700',fontSize:'0.9rem',color: m.winnerId===m.teamBId?'var(--accent-success)':'var(--text-primary)',lineHeight:'1.2'}}, [nameB]));
+              if (tB?.players?.length) {
+                  const p = tB.players.filter(p=>p?.name?.trim()).map(p=>p.name.trim()).join(' · ');
+                  tBDiv.appendChild(el('div', {style:{fontSize:'0.68rem',color:'var(--text-muted)',marginTop:'2px'}}, [p]));
+              }
+              row.appendChild(tBDiv);
+
+              // Right meta: stage + time
+              const metaDiv = el('div', {style:{textAlign:'right'}});
+              if (m.stage) metaDiv.appendChild(el('div', {style:{fontSize:'0.62rem',color:'var(--accent-primary)',fontWeight:'700',textTransform:'uppercase',letterSpacing:'0.04em',lineHeight:'1.3'}}, [m.stage]));
+              if (m.scheduledTime) metaDiv.appendChild(el('div', {style:{fontSize:'0.65rem',color:'var(--text-muted)',marginTop:'2px'}}, [m.scheduledTime]));
+              if (isLive) {
+                  const wBtn = el('button', {
+                      className:'btn btn-danger btn-sm',
+                      style:{fontSize:'0.65rem',padding:'3px 8px',minHeight:'auto',marginTop:'4px',display:'block',width:'100%'},
+                      onClick: (e) => { e.stopPropagation(); DisplayManager.launchScoreboard(m.id); }
+                  }, ['📺 Watch']);
+                  metaDiv.appendChild(wBtn);
+              }
+              row.appendChild(metaDiv);
+
+              listWrap.appendChild(row);
           });
 
-          // Render the active card
-          const activeMatch = filtered.find(m => m.id === this._fixtureSubTab) || filtered[0];
-          if (activeMatch) renderCard(activeMatch);
+          // Result count
+          if (filtered.length < sorted.length) {
+              const cnt = el('div', {style:{textAlign:'center',padding:'8px',color:'var(--text-muted)',fontSize:'0.78rem'}});
+              cnt.textContent = `Showing ${filtered.length} of ${sorted.length} matches`;
+              listWrap.appendChild(cnt);
+          }
       };
 
-      // Initial render
-      updateList();
-
-      // Mobile: collapse to full-width stack
-      const mq = window.matchMedia('(max-width:700px)');
-      if (mq.matches) {
-          layout.style.gridTemplateColumns = '1fr';
-          listPanel.style.maxHeight = '260px';
-      }
+      renderList();
+      searchInp.addEventListener('input', renderList);
+      statusSel.addEventListener('change', renderList);
+      courtSel.addEventListener('change', renderList);
+      groupSel.addEventListener('change', renderList);
 
       return wrap;
   },
@@ -3217,7 +3203,7 @@ window.TournamentHub = {
           { key:'canViewBracket',  label:'Knockout Bracket tab',          desc:'Show the elimination bracket',                    def:true  },
           { key:'canViewStats',    label:'Player Stats tab',              desc:'Show match stats and win rates per player',        def:true  },
           { key:'canViewLiveMatch',label:'Open Live Scoreboard',          desc:'Allow umpires to open the stadium display',        def:true  },
-          { key:'canStartMatch',   label:'Start & Score Matches',         desc:'Give umpires the full control panel (use with care)',def:true  },
+          { key:'canStartMatch',   label:'Start & Score Matches',         desc:'Give umpires the full control panel (use with care)',def:false },
       ];
       permDefs.forEach(pd => permCard.appendChild(toggleRow(pd.label, pd.desc, pd.key, pd.def)));
       wrap.appendChild(permCard);
@@ -3441,20 +3427,29 @@ window.TournamentHub = {
               // Check umpire permissions for viewing and starting
               const canViewLive   = umpirePerms.canViewLiveMatch !== false;
               const canStartMatch = umpirePerms.canStartMatch === true;
+              const isUmpireWithStart = isSpectator && !!localStorage.getItem('UMPIRE_SESSION_ID') && canStartMatch;
+
               if (m.status === 'completed') {
                   actionsRow.appendChild(el('span', {className:'text-xs', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['MATCH COMPLETED ✓']));
               } else if (m.status === 'live') {
-                  if (canStartMatch) {
+                  if (isUmpireWithStart) {
                       actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm w-full', style:{fontSize:'0.85rem',padding:'8px 12px',fontWeight:'bold'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 RESUME & SCORE MATCH']));
                   } else if (canViewLive) {
                       actionsRow.appendChild(el('button', { className: 'btn btn-primary btn-sm w-full', style: {fontSize: '0.85rem', padding: '8px 12px'}, onClick: () => DisplayManager.launchScoreboard(m.id) }, ['📺 View Live Match']));
                   } else {
                       actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['LIVE']));
                   }
-              } else if (m.status === 'pending' && m.teamAId && m.teamBId && canStartMatch) {
-                  actionsRow.appendChild(el('button', { className: 'btn btn-success btn-sm w-full', style:{fontSize:'0.85rem',padding:'8px 12px',fontWeight:'800',letterSpacing:'0.04em'}, onClick: () => this._playTournamentMatch(m.id) }, ['🎙️ START & SCORE MATCH']));
+              } else if (m.status === 'pending' && m.teamAId && m.teamBId) {
+                  if (isUmpireWithStart) {
+                      actionsRow.appendChild(el('button', { className: 'btn btn-success btn-sm w-full', style:{fontSize:'0.85rem',padding:'8px 12px',fontWeight:'800',letterSpacing:'0.04em'}, onClick: () => this._playTournamentMatch(m.id) }, ['🎙️ START & SCORE MATCH']));
+                  } else if (canViewLive) {
+                      // Umpire session without start perm — show time info, no action
+                      actionsRow.appendChild(el('span', {className:'text-xs', style:{color:'var(--accent-warning)',fontWeight:'700'}}, [m.scheduledTime ? `⏰ ${m.scheduledTime}` : 'UPCOMING']));
+                  } else {
+                      actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['UPCOMING']));
+                  }
               } else {
-                  actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, [m.teamAId && m.teamBId ? 'UPCOMING' : 'PENDING TEAMS']));
+                  actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['PENDING TEAMS']));
               }
           } else {
               if (m.status === 'completed') {
@@ -3608,13 +3603,22 @@ window.TournamentHub = {
                   mSel.appendChild(makeTeamRow(m.teamB));
 
                   // Action row
+                  const _grpUmpCanStart = isSpectator && umpirePerms.canStartMatch === true && !!localStorage.getItem('UMPIRE_SESSION_ID');
                   if (!isSpectator && m.status === 'pending' && m.teamAId && m.teamBId) {
                       const actRow = el('div', {style:{padding:'6px 10px', textAlign:'center', background:'rgba(0,0,0,0.2)', borderTop:'1px solid var(--border-color)'}});
                       actRow.appendChild(el('button', {className:'btn btn-primary btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, ['▶ Start Match']));
                       mSel.appendChild(actRow);
+                  } else if (_grpUmpCanStart && m.status === 'pending' && m.teamAId && m.teamBId) {
+                      const actRow = el('div', {style:{padding:'6px 10px', textAlign:'center', background:'rgba(0,0,0,0.2)', borderTop:'1px solid var(--border-color)'}});
+                      actRow.appendChild(el('button', {className:'btn btn-success btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto', fontWeight:'800'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, ['🎙️ Start Match']));
+                      mSel.appendChild(actRow);
                   } else if (m.status === 'live') {
                       const actRow = el('div', {style:{padding:'6px 10px', textAlign:'center', background:'rgba(0,0,0,0.2)', borderTop:'1px solid var(--border-color)'}});
-                      actRow.appendChild(el('button', {className:'btn btn-warning btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto', fontWeight:'bold'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, ['🔴 Resume Live']));
+                      if (!isSpectator || _grpUmpCanStart) {
+                          actRow.appendChild(el('button', {className:'btn btn-warning btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto', fontWeight:'bold'}, onClick: () => window.TournamentHub._playTournamentMatch(m.id)}, ['🔴 Resume Live']));
+                      } else if (umpirePerms.canViewLiveMatch !== false) {
+                          actRow.appendChild(el('button', {className:'btn btn-primary btn-sm w-full no-print', style:{fontSize:'0.78rem', padding:'5px 10px', minHeight:'auto'}, onClick: () => DisplayManager.launchScoreboard(m.id)}, ['📺 Watch Live']));
+                      }
                       mSel.appendChild(actRow);
                   }
                   matchesDiv.appendChild(mSel);
@@ -3709,13 +3713,14 @@ window.TournamentHub = {
               else {
                   const actionsRow = el('div', { className: 'no-print', style: { padding: '8px', textAlign: 'center', background: 'rgba(0,0,0,0.3)', borderBottomLeftRadius: '6px', borderBottomRightRadius: '6px', borderTop:'1px solid var(--border-color)' } });
                   if (isSpectator) {
+                      const _umpCanStart = umpirePerms.canStartMatch === true && !!localStorage.getItem('UMPIRE_SESSION_ID');
                       if (m.status === 'completed') actionsRow.appendChild(el('span', {className:'text-xs text-success', style:{color: 'var(--accent-success)', fontWeight:'bold'}}, ['COMPLETED ✓']));
                       else if (m.status === 'live') {
-                          if (umpirePerms.canStartMatch) actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto', fontWeight:'bold'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 RESUME & SCORE']));
+                          if (_umpCanStart) actionsRow.appendChild(el('button', { className: 'btn btn-warning btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto', fontWeight:'bold'}, onClick: () => this._playTournamentMatch(m.id) }, ['🔴 RESUME & SCORE']));
                           else actionsRow.appendChild(el('button', { className: 'btn btn-primary btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto'}, onClick: () => DisplayManager.launchScoreboard(m.id) }, ['📺 View Live Match']));
                       }
-                      else if (m.status === 'pending' && m.teamA && m.teamB && umpirePerms.canStartMatch) actionsRow.appendChild(el('button', { className: 'btn btn-success btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto', fontWeight:'800'}, onClick: () => this._playTournamentMatch(m.id) }, ['🎙️ START MATCH']));
-                      else actionsRow.appendChild(el('span', {className:'text-xs text-muted font-bold'}, ['UPCOMING']));
+                      else if (m.status === 'pending' && m.teamA && m.teamB && _umpCanStart) actionsRow.appendChild(el('button', { className: 'btn btn-success btn-sm w-full', style: {fontSize: '0.75rem', padding: '4px 8px', minHeight:'auto', fontWeight:'800'}, onClick: () => this._playTournamentMatch(m.id) }, ['🎙️ START MATCH']));
+                      else actionsRow.appendChild(el('span', {className:'text-xs', style:{color:'var(--text-muted)',fontWeight:'700'}}, [m.scheduledTime ? `⏰ ${m.scheduledTime}` : 'UPCOMING']));
                   } else {
                       if (m.status === 'completed') {
                           actionsRow.style.display = 'flex';
